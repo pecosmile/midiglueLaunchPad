@@ -1,0 +1,286 @@
+<Comment>
+prgChangeBox
+
+kokou ni-sui@sabaco
+
+<I/O>
+input MidiPacket : proglam change入力
+input MidiPacket : launchpadからの入力
+output MidiPacket : proglam change出力
+output IntList : launchpadへの出力
+
+<Description>
+LaunchPad上に、プログラムチェンジ用の画面を表示、押した場所に対応するプログラムを送ります。
+また、入力したprogram changeに対応するボタンを光らせます。
+現在の所、スクロール機能が無いため、表示範囲外のプログラムは選択・表示できません
+
+※ノード単体では動きません。main_template.cppに、専用の定数・クラスを設定する必要があります。
+
+
+未実装の機能
+□スクロール機能
+
+<Parameter>
+parameter Locate = 0 : 描画位置(0-6)
+parameter Height = 4 : 描画範囲(2-8)
+parameter Channel = 16 : チャンネル(1-16)
+
+<Setup>
+// Bung設定
+${this}( &(Midiglue::__bang) , Midiglue::SETUP );
+
+<Code>
+
+/*********************************************
+ * 定数
+**********************************************/
+static const uint8_t LOCATE_Y = ${Locate};  // 基準位置（縦）
+static const uint8_t BOXSIZE_X = 8;         // サイズ（横）
+static const uint8_t BOXSIZE_Y = ${Height}; // サイズ（縦）
+static const uint8_t MIDI_CH = ${Channel};  // チャンネル
+
+// プログラム識別用の色
+static const uint8_t mColor[8] = {
+    LP3C_D_RED,     // 1:茶色
+    LP3C_RED,       // 2:赤
+    LP3C_ORANGE,    // 3:オレンジ
+    LP3C_YELLOW,    // 4:黄色
+    LP3C_GREEN,     // 5:緑
+    LP3C_BLUE,      // 6:青
+    LP3C_PURPLE,    // 7:紫
+    LP3C_DK_GLAY    // 8:灰色
+};
+
+// 色：現在プログラム
+static const uint8_t CL_NOW = LP3C_WHITE;
+// 色：選択中プログラム
+static const uint8_t CL_SETTING = LP3C_BL_PURPLE;
+
+// ステータス
+static const uint8_t ST_IDOL = 0;       // IDOL
+static const uint8_t ST_WAIT = 1;       // プログラム変更待ち
+
+/*********************************************
+ * 変数
+**********************************************/
+// Launchpad 描画情報
+static IntList mpDispLp3 = Midiglue::init_default<IntList>();
+// ステータス
+static uint8_t mStatus = ST_IDOL;
+
+// スクロール位置
+static uint8_t mScrool = 0;
+
+// 現在のプログラムNo
+static uint8_t mNowPrgNo = 0xff;
+// 指定したプログラムNo
+static uint8_t mSettingPrgNo = 0xff;
+
+/*********************************************
+ * 関数
+**********************************************/
+
+// プログラム番号から変換
+// prgNo < 0x80 でお願いします
+static auto progNo2Locate = [&](uint8_t prgNo,uint8_t* x,uint8_t* y){
+    *x = prgNo%8;
+    *y = prgNo/8;
+};
+
+// スクロール範囲内判定
+static auto checkOfRangeIn = [&](uint8_t y) -> bool {
+    if(y < mScrool || y >= mScrool + BOXSIZE_Y) {
+        return(false);
+    }
+    return(true);
+
+};
+
+// 指定した段の一番左のボタンに対応するプログラム番号を返す
+static auto getProgramNo = [&](uint8_t x,uint8_t y)-> uint8_t {
+    // スクロール補正
+    y+=mScrool;
+    return(y*8+x);
+};
+
+// 指定した段の色を返す
+static auto getBaseColor = [&](uint8_t y)-> uint8_t {
+    // 2段ごと（16ごと）に色を変える
+    return(mColor[y/2]);
+};
+
+// program Noによって、色と明滅パターンの変更が必要な場合変更する
+static auto changeColorAndMode = [&](uint8_t prgNo,uint8_t* color,uint8_t* mode) {
+    // 色と明滅パターンを変える
+    if(prgNo == mNowPrgNo) {
+        *color = CL_NOW;
+        *mode = LP3B_PULS;
+    } else if(prgNo == mSettingPrgNo) {
+        *color = CL_SETTING;
+        *mode = LP3B_PULS;
+    }
+};
+
+
+// program Noから描画処理
+static auto drowProglamNo = [&](uint8_t prgNo) {
+
+    // プログラム番号を座標に変換
+    uint8_t x = 0;
+    uint8_t y = 0;
+    progNo2Locate(prgNo,&x,&y);
+
+    // 表示範囲外なら処理不要
+    if(!checkOfRangeIn(y)) {
+        return;
+    }
+
+    // 色と明滅モードの設定
+    uint8_t color = getBaseColor(y);
+    uint8_t mode = LP3B_NOMAL;
+    changeColorAndMode(prgNo,&color,&mode);
+
+    // 座標補正
+    y -= mScrool;
+
+    // LP3への送信
+    Lp3::addDot(mpDispLp3,mode,x,LOCATE_Y + y,color);
+};
+
+// 再描画
+static auto reDrow = [&](){
+
+    // 描画位置に対応するprogram No
+    // note:座標位置確定毎にgetProgramNoを呼んでもいいけど、1ずつしか
+    // 増えない事が確定しているので。
+    uint8_t prgNo = getProgramNo(0,mScrool);
+
+    for(int y=0;y<BOXSIZE_Y;y++){
+        // 指定した段の色を取得
+        uint8_t baseColor = getBaseColor(y + mScrool);
+        for(int x=0;x<BOXSIZE_X;x++){
+            uint8_t color = baseColor;
+            uint8_t mode = LP3B_NOMAL;
+            changeColorAndMode(prgNo,&color,&mode);
+            // LP3への送信
+            Lp3::addDot(mpDispLp3,mode,x,LOCATE_Y + y,color);
+            // プログラム番号を次に送る
+            ++prgNo;
+        }
+    }
+};
+
+
+
+ // 初期化
+static auto initDrow = [&](){
+    mpDispLp3->clear();
+    reDrow();
+    out1 = mpDispLp3;
+};
+
+
+// 入力：プログラムチェンジ
+static auto inputPrgChange = [&](uint8_t prgNo){
+
+    // program No の変更
+    uint8_t oldPrgNo = mNowPrgNo;
+    mNowPrgNo = prgNo;
+
+    // Launch Pad描画
+    drowProglamNo(oldPrgNo);
+    drowProglamNo(mNowPrgNo);
+};
+
+/*****************
+ * LaunchPadからの入力
+ * @param x 押されたボタンのX軸(0～8)
+ * @param y 押されたボタンのy軸(0～8)
+ * @param value value値
+ */
+static auto inputProgramChange = [&](uint8_t x,uint8_t y,uint8_t value){
+
+    Midiglue::Debug::write_log("1", x*10+y);
+
+    // boxの範囲内であることを確認(縦)
+    if(y < LOCATE_Y || y >= (LOCATE_Y + BOXSIZE_Y)){
+        return;
+    }
+
+    // y軸補正
+    y += (mScrool - LOCATE_Y);
+
+    Midiglue::Debug::write_log("inputProgramChange", x*10+y);
+
+    // boxの範囲内であることを確認(横)
+    if(x<LP3_maxXY){
+        // progNo
+        uint8_t prgNo = x + y*LP3_maxXY;
+        // program No の変更
+        uint8_t oldPrgNo = mSettingPrgNo;
+        mSettingPrgNo = prgNo;
+        // Launch Pad描画
+        drowProglamNo(oldPrgNo);
+        drowProglamNo(mSettingPrgNo);
+        // midi outへの出力
+        auto packet = MidiPacket::makeProgramChange(MIDI_CH, prgNo);
+        out0 = packet;
+    }
+    else { // ボックスの右側[>] が押されている。
+
+    }
+
+};
+
+
+// 入力：LaunchPad
+static auto inputLaunchPad = [&](MidiPacket packet){
+    // LaunchPadからの入力
+    // 押された場所の取得
+    static uint8_t x;
+    static uint8_t y;
+    if(Lp3::getLocation(packet,&x,&y)){
+        // // 最上段のボタンクリック
+        // inputFunction(packet.getControlNumber(),packet.getControlValue());
+    }else {
+        // そのほかのボタン
+        inputProgramChange(x,y,packet.getControlValue());
+    };
+
+
+};
+
+/*********************************************
+* 割り込みイベント
+**********************************************/
+// LaunchPadの初期表示
+static auto initEvent = Midiglue::make_oneshot_us_event<>(initDrow);
+
+/*********************************************
+* 実行処理
+**********************************************/
+
+// バッファクリア
+mpDispLp3->clear();
+
+// セットアップ
+if (@setup){
+    Midiglue::Debug::write_log("@setup", float(0.0));
+
+    // 3秒後に初期表示処理を呼び出す
+    initEvent->schedule(3000 * 1000);
+}
+else if (@in0){ // goove boxからの入力
+    // 指定channelにプログラムチェンジが来た場合
+    if (Midiglue::is_valid(in0) && MIDI_CH == in0.getChannel() && in0.isProgramChange()){
+        inputPrgChange(in0.getProgramNumber());
+    }
+}
+else if (@in1) { // LaunchPadからの入力
+    inputLaunchPad(in1);
+}
+
+// バッファがあればlaunchpadに送信
+if(0<mpDispLp3->size()){
+    out1 = mpDispLp3;
+}

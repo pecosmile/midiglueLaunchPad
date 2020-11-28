@@ -1,0 +1,132 @@
+<Comment>
+lpControl
+LaunchPad描画のSysExを出力します。
+LaunchPadをProgrammer modeに設定する必要があります。
+詳しくは「Launchpad mini mk3 Programmer’s reference manual」を参照してください。
+
+inputには、３バイト単位で[光点モード][光らせる位置][色]を送ります。
+ノードはこの情報をバッファリング。Intervalで設定した間隔で、描画処理します。
+このため「Inputに情報を送った直後に描画する」訳ではないことに留意してください。
+最大Intervalでした時間だけディレイします。
+
+kokou ni-sui@sabaco
+
+<I/O>
+input IntList : mute処理情報(muteBox)
+output MidiSysEx : 描画情報(LaunchPad mini 3)
+
+<Description>
+LaunchPad描画のSysExを出力します。
+起動直後にLaunchPadをProgrammer modeに設定します。
+LaunchPad接続後にプログラムを起動する必要があります。
+
+詳しくは「Launchpad mini mk3 Programmer’s reference manual」を参照してください。
+
+描画バッファには、３バイト単位で[光点モード][光らせる位置][色]を送ります。
+ノードはこの情報をバッファリング。 Intervalで設定した間隔で、描画処理します。
+このため「Inputに情報を送った直後に描画する」訳ではないことに留意してください。
+最大Intervalでした時間だけディレイします。
+
+※ノード単体では動きません。main_template.cppに、専用の定数・クラスを設定する必要があります。
+
+
+<Parameter>
+parameter Interval = 30 : 描画する間隔（msec）小さいと、うまく動きません
+parameter max_put = 32 : 一度に描画する最大ドット36以上はうまく動きません。
+
+<Setup>
+// Bung設定
+${this}( &(Midiglue::__bang) , Midiglue::SETUP );
+
+<Code>
+
+
+/*********************************************
+ * 定数
+**********************************************/
+/** Launch Pad mini 3 初期化用のバイナリ */
+static const uint8_t LP3_INIT_SYSEX[] = { 0xF0,0x00,0x20,0x29,0x02,0x0D,0x00,0x7F,0xF7,};
+static const uint32_t LP3_INIT_SYSEX_SIZE = 9u;
+/** sysEx ヘッダ */
+static const std::vector<uint8_t> LP3_exh = { 0xf0,0x00,0x20,0x29,0x02,0x0d,0x03,};
+/** sysEx フッター */
+static const uint8_t LP3_exf = 0x7f;
+
+/** 描画情報を保持するバッファ */
+static IntList pLpDots = Midiglue::init_default<IntList>();
+/** 送信バッファ */
+static std::vector<uint8_t> mLp3Buff;
+/** SysEx送信用 */
+static MidiSysEx sysex{0u, nullptr};
+
+/*********************************************
+ * 関数
+**********************************************/
+// LaunchPadへの描画データ送信（単位時間ごとのSysEx吐き出し）
+static auto initLaunchPad = [&](){
+    // SysExとして送信
+    sysex.len = LP3_INIT_SYSEX_SIZE;
+    sysex.buf = LP3_INIT_SYSEX;
+
+    out0 = sysex;
+};
+
+// LaunchPadへの描画データ送信（単位時間ごとのSysEx吐き出し）
+static auto drowLaunchPad = [&](){
+    // データがなければ処理しない
+    if(pLpDots->size() < 3) {
+        return;
+    }
+    // バッファクリア
+    mLp3Buff.clear();
+    // hederの値をセット
+    for(auto itr = LP3_exh.begin(); itr != LP3_exh.end(); ++itr) {
+        mLp3Buff.push_back(*itr);
+    }
+    // pLpDotsに持っているバッファを３つ単位で送信する
+    int count = ${max_put};
+    while(pLpDots->size()>=3 && count > 0) {
+        // TODO:elete()遅いという指摘あり。可能であればリングバッファを準備。
+        mLp3Buff.push_back(*(pLpDots->begin()));
+        pLpDots->erase(pLpDots->begin());
+        mLp3Buff.push_back(*(pLpDots->begin()));
+        pLpDots->erase(pLpDots->begin());
+        mLp3Buff.push_back(*(pLpDots->begin()));
+        pLpDots->erase(pLpDots->begin());
+        count--;
+    }
+    // フッタ
+    mLp3Buff.push_back(LP3_exf);
+
+    // SysExとして送信
+    sysex.len = mLp3Buff.size();
+    sysex.buf = mLp3Buff.data();
+
+    out0 = sysex;
+
+};
+
+/*********************************************
+* 割り込みイベント
+**********************************************/
+// 初期化イベント
+static auto initEvent = Midiglue::make_oneshot_us_event<>(initLaunchPad);
+// 描画イベント
+static auto drowEvent = Midiglue::make_cyclic_us_event<>(drowLaunchPad);
+
+// セットアップ
+if (@setup){
+    // 初期表示イベント設定（1回のみ）
+    initEvent->schedule(800 * 1000);
+    // 描画イベント（定期的に呼び出し）
+    drowEvent->schedule(${Interval} * 1000);
+}
+else if (@in0){
+    // 受信したバッファを一時保存
+    // TODO:たぶんvectorの結合あるんじゃないかな。
+    for(auto itr = in0->begin(); itr != in0->end(); ++itr) {
+        pLpDots->push_back(*itr);
+    }
+
+}
+
