@@ -17,9 +17,6 @@ LaunchPad上に、プログラムチェンジ用の画面を表示、押した�
 ※ノード単体では動きません。main_template.cppに、専用の定数・クラスを設定する必要があります。
 
 
-未実装の機能
-□スクロール機能
-
 <Parameter>
 parameter Locate = 0 : 描画位置(0-6)
 parameter Height = 4 : 描画範囲(2-8)
@@ -38,12 +35,18 @@ static const uint8_t LOCATE_Y = ${Locate};  // 基準位置（縦）
 static const uint8_t BOXSIZE_X = 8;         // サイズ（横）
 static const uint8_t BOXSIZE_Y = ${Height}; // サイズ（縦）
 static const uint8_t MIDI_CH = ${Channel};  // チャンネル
+static const uint8_t SCROOL_MAX = 16;  // スクロールの最大値(8*16)
+
+static const uint8_t SCROOL_UP = LP3K_UP;       // スクロール：上
+static const uint8_t SCROOL_DOWN = LP3K_DOWN;   // スクロール：下
+
+
 
 // プログラム識別用の色
 static const uint8_t mColor[8] = {
     LP3C_D_RED,     // 1:茶色
     LP3C_RED,       // 2:赤
-    LP3C_ORANGE,    // 3:オレンジ
+    LP3C_L_ORANGE,  // 3:オレンジ
     LP3C_YELLOW,    // 4:黄色
     LP3C_GREEN,     // 5:緑
     LP3C_BLUE,      // 6:青
@@ -96,13 +99,6 @@ static auto checkOfRangeIn = [&](uint8_t y) -> bool {
 
 };
 
-// 指定した段の一番左のボタンに対応するプログラム番号を返す
-static auto getProgramNo = [&](uint8_t x,uint8_t y)-> uint8_t {
-    // スクロール補正
-    y+=mScrool;
-    return(y*8+x);
-};
-
 // 指定した段の色を返す
 static auto getBaseColor = [&](uint8_t y)-> uint8_t {
     // 2段ごと（16ごと）に色を変える
@@ -153,7 +149,7 @@ static auto reDrow = [&](){
     // 描画位置に対応するprogram No
     // note:座標位置確定毎にgetProgramNoを呼んでもいいけど、1ずつしか
     // 増えない事が確定しているので。
-    uint8_t prgNo = getProgramNo(0,mScrool);
+    uint8_t prgNo = mScrool * 8;
 
     for(int y=0;y<BOXSIZE_Y;y++){
         // 指定した段の色を取得
@@ -232,20 +228,48 @@ static auto inputProgramChange = [&](uint8_t x,uint8_t y,uint8_t value){
 
 };
 
+// 入力：カーソルキーを押している場合
+static auto inputScrool = [&](MidiPacket midi) -> bool {
+    // 処理不要の場合はfalseを返す
+    uint8_t cc = midi.getControlNumber();
+    if(midi.getControlValue() == 0 ||
+        (cc != SCROOL_UP && cc != SCROOL_DOWN)) {
+        return(false);
+    }
+
+    // スクロール方向を決める
+    int vactor = (cc == SCROOL_UP) ? -1 : +1;
+    // スクロール
+    uint8_t moveTo = mScrool + vactor;
+    // スクロールの最大値を越える場合は処理出来ない
+    // ※結果が0未満の場合もオーバーフローによって最大値を超える
+    if(moveTo > (SCROOL_MAX - BOXSIZE_Y) ) {
+        return(true);
+    }
+    // スクロール位置を移動して再描画
+    mScrool = moveTo;
+    reDrow();
+    return(true);
+};
+
 
 // 入力：LaunchPad
-static auto inputLaunchPad = [&](MidiPacket packet){
+static auto inputLaunchPad = [&](MidiPacket midi){
+
     // LaunchPadからの入力
+
+    // スクロール処理
+    if(inputScrool(midi)) {
+        return;
+    }
+
     // 押された場所の取得
     static uint8_t x;
     static uint8_t y;
-    if(Lp3::getLocation(packet,&x,&y)){
-        // // 最上段のボタンクリック
-        // inputFunction(packet.getControlNumber(),packet.getControlValue());
-    }else {
-        // そのほかのボタン
-        inputProgramChange(x,y,packet.getControlValue());
-    };
+    if(!Lp3::getLocation(midi,&x,&y)){
+        // 処理が必要なボタンが押された場合
+        inputProgramChange(x,y,midi.getControlValue());
+    }
 
 
 };
