@@ -1,0 +1,355 @@
+<Comment>
+muteBox
+GroobeBoxにミュート状態の表示をします。
+
+kokou ni-sui@sabaco
+
+<I/O>
+input Int : LaunchPad制御（0=Disable）
+input IntList : ミュート処理情報(muteXXX)
+input MidiPacket : ボタン入力情報(LaunchPad) 
+input IntList : パターン処理情報(patternBox)
+output IntList : ミュート処理情報(muteXXX)
+output IntList : 描画情報(lpControl)
+output IntList : パターン処理情報(patternBox)
+
+<Description>
+TODO:後で書く
+
+<Parameter>
+parameter locate = 6 : 0-6 muteBoxを置く位置
+
+<Setup>
+// Bung設定
+${this}( &(Midiglue::__bang) , Midiglue::SETUP );
+
+<Code>
+
+
+/*****
+ * 定数
+ *****/
+// 描画位置
+static const uint8_t MB_LOC = ${locate};
+
+
+/*****
+ * 変数
+ *****/
+// 色情報
+static uint8_t colorInfo[16] = { LP3C_ORANGE };
+
+// GBMute(grooveBoxのmute情報)
+static uint8_t muteGBox[2];
+// 編集中mute
+static uint8_t muteEdit[2];
+// 表示カレント（操作中のMute）
+static uint8_t* pCurrentDisp = muteGBox;
+
+
+// 出力(Launch Pad)
+static IntList mpDispLp3 = Midiglue::init_default<IntList>();
+// 出力(GrooveBox)
+static IntList pMuteXXX = Midiglue::init_default<IntList>();
+// 出力(patternBox)
+static IntList pPtnBox = Midiglue::init_default<IntList>();
+// ミュートロック
+static bool flagMuteLock = false;
+// ソロロック
+static bool flagSoloLock = false;
+// ミュート解除フラグ
+static bool flagUnMute = false;
+
+// LaunchPad入出力許可フラグ
+static bool lpEnable = true;
+
+
+
+
+/*****************
+ * 編集モードチェック（表示カレントが編集中muteに向いている状態）
+ * @param status ステータス
+ */
+static auto isEditMode = [&]() -> bool {
+    return(pCurrentDisp == muteEdit);
+};
+
+// [無名関数]指定位置のカラー番号を返す（yはMB_LOCからの相対位置で指定）
+static auto getColor = [&](uint8_t x,uint8_t y) -> uint8_t {
+    uint8_t mask = 0x80 >> x;
+
+    // 色指定（muteLock時は、赤色になる）    
+    uint8_t onColor = LP3C_RED;
+    uint8_t offColor = LP3C_D_RED;
+    if(!flagMuteLock){
+        onColor = colorInfo[y*LP3_maxXY + x];
+        offColor = LP3C_DK_GLAY;
+    }
+
+    // ステータスにより色を変更
+    if(0<(pCurrentDisp[y] & mask)) {
+        return(onColor);
+    }
+    return(offColor);
+
+};
+
+
+/*****************
+ * 表示のreDrow
+ */
+static auto reDrow = [&](){
+    for(int i=0;i<16;i++) {
+        uint8_t y = i/LP3_maxXY;
+        uint8_t x = i%LP3_maxXY;
+        Lp3::addDot(mpDispLp3,0,x,MB_LOC + y,getColor(x,y));
+    }
+};
+
+ // 初期化
+static auto initDrow = [&](){
+    mpDispLp3->clear();
+    reDrow();
+    out1 = mpDispLp3;
+};
+
+/*****************
+ * muteXXXへのミュート情報の送信
+ * @param status ステータス
+ */
+static auto sendMuteXXX = [&](uint8_t status){
+    // ミュートロック時は送信しないよ
+    if(!flagMuteLock){
+        pMuteXXX->clear();
+        pMuteXXX->push_back(muteGBox[0]);
+        pMuteXXX->push_back(muteGBox[1]);
+        pMuteXXX->push_back(status);
+        out0 = pMuteXXX;
+    }
+};
+
+/*****************
+ * 操作ミュート情報の送信
+ * @param status ステータス
+ */
+static auto sendMuteOperationData = [&](uint8_t status){
+    // 編集モードでないなら状態をgrooveBoxに送信
+    if(!isEditMode()) {
+        sendMuteXXX(status);
+    } else {
+        // muteEditの内容をpatternBoxに送信
+        pPtnBox->clear();
+        pPtnBox->push_back(muteEdit[0]);
+        pPtnBox->push_back(muteEdit[1]);
+        out2 = pPtnBox;
+    }
+};
+
+
+
+/*****************
+ * MuteXXX からの入力
+ * @param buff 入力
+ */
+static auto inputMuteXXX = [&](IntList buff){
+    // バッファサイズが16の場合、色の初期化情報とする。
+    if(16 == buff->size() ) {
+        // フラグの初期化
+        muteGBox[0] = 0xff;
+        muteGBox[1] = 0xff;
+        // 色の初期化
+        for(int i=0;i<16;i++) {
+            colorInfo[i] = buff->at(i);
+        }
+        // ボタンの描画
+        reDrow();                                          // 全ボタンの描画
+        Lp3::addDot(mpDispLp3,2,8,MB_LOC,LP3C_BLUE);          // muteLockボタンの設定
+        Lp3::addDot(mpDispLp3,2,8,MB_LOC + 1,LP3C_WHITE);     // mute/solo ボタン
+    }
+    else if(2 == buff->size()) { // バッファサイズが2の場合、mute処理
+        // ミュートステータス設定
+        muteGBox[0] = buff->at(0);
+        muteGBox[1] = buff->at(1);
+        reDrow();
+    }
+};
+
+
+/*****************
+ * LaunchPadからの入力処理
+ * @param x 押されたボタンのX軸(0～8)
+ * @param y 押されたボタンのy軸(0～1)
+ * @param value value値
+ */
+static auto inputLaunchPad = [&](uint8_t x,uint8_t y,uint8_t value){
+    if(x<LP3_maxXY) {
+        // ミュートロック中の操作なのでミュート解除は無効
+        flagUnMute = false;
+        if(value > 0){
+
+            if(!flagSoloLock) {     // ソロキーを押下していない。
+                // ステータスを更新
+                pCurrentDisp[y] ^= 0x80 >> x;
+                // Launchpadの値を更新
+                Lp3::addDot(mpDispLp3,0,x,MB_LOC + y,getColor(x,y));
+
+            } else {                // ソロキーを押下してる。
+                flagSoloLock = false;
+                // 一回クリアして値をソロにする
+                pCurrentDisp[0] = 0;
+                pCurrentDisp[1] = 0;
+                pCurrentDisp[y] = 0x80 >> x;
+                // Launchpadの値を更新
+                reDrow();
+            }
+
+            // 操作情報をpatternBox or grooveBoxに送信
+            sendMuteOperationData(0);// 変更分のみ送信
+        }
+    }
+    else {
+        // 9列目のボタンはmutelock mute/solo ボタン
+
+        if(y==0) { 
+        // -----------------
+        // muteLockボタン処理
+        // -----------------
+            if(value > 0){
+                flagMuteLock = true;
+            }
+            else {
+                flagMuteLock = false;
+                // launchpad リフレッシュ
+                reDrow();
+
+                // 操作情報をpatternBox or grooveBoxに送信
+                sendMuteOperationData(LP3_MB_REFRESH_MUTE);
+            }
+        } else if(y==1) {
+        // -----------------
+        // mute/soloボタン処理
+        // -----------------
+            if(value > 0){ // 押したとき
+                flagSoloLock = true;
+                flagUnMute = true;
+            } else { // 離したとき
+                flagSoloLock = false;
+                // ミュートロック時にミュート操作をしていない場合は
+                // 全ミュートを解除する
+                if(flagUnMute) {
+                    pCurrentDisp[0] = 0xff;
+                    pCurrentDisp[1] = 0xff;
+                    flagUnMute = false;
+                    // launchpad リフレッシュ
+                    reDrow();
+
+                    // 操作情報をpatternBox or grooveBoxに送信
+                    sendMuteOperationData(LP3_MB_REFRESH_MUTE);
+                }
+            }
+        }
+    }
+};
+
+/*****************
+ * patternBox からの入力
+ * @param buff 入力
+ */
+static auto inputPatternBox = [&](IntList buff){
+    // ステータス取得
+    uint8_t status = buff->at(2) & LP3_MB_MODE;
+
+    switch(status){
+
+    // ①再生モード
+    case LP3_MB_MODE_PLAY:
+
+        // GBMuteへの設定
+        muteGBox[0] = buff->at(0);
+        muteGBox[1] = buff->at(1);
+        // patternBoxからの受信はそのままmuteXXXに送信
+        sendMuteXXX(LP3_MB_REFRESH_MUTE);
+        // 表示カレントが「groubeBoxのmute情報」であれば、ディスプレイ表示
+        if(!isEditMode()) {
+            reDrow();
+        }
+    break;
+
+    // ②編集モード（開始）
+    case LP3_MB_MODE_EDIT_ST:
+
+        // 表示カレントを「編集中mute」に変更
+        pCurrentDisp = muteEdit;
+        // 取得した値を「編集中mute」に設定
+        muteEdit[0] = buff->at(0);
+        muteEdit[1] = buff->at(1);
+        // ディスプレイ表示
+        reDrow();
+    break;
+
+    // ③編集モード（終了）
+    case LP3_MB_MODE_EDIT_ED:
+        // 表示カレントを「GBMute」に変更
+        pCurrentDisp = muteGBox;
+        // ディスプレイ表示
+        reDrow();
+    break;
+
+    }
+};
+
+/*********************************************
+* 割り込みイベント
+**********************************************/
+// LaunchPadの初期表示
+static auto initEvent = Midiglue::make_oneshot_us_event<>(initDrow);
+
+
+/*********************************************
+* 実行処理
+**********************************************/
+
+mpDispLp3->clear();
+
+// セットアップ
+if (@setup){
+    // 3秒後に初期表示処理を呼び出す
+    initEvent->schedule(3000 * 1000);
+}
+else if (@in0){ // Enable
+    if (in0 == 0) {
+        lpEnable = false;
+    } else {
+        lpEnable = true;
+        reDrow();
+    }
+}
+else if (@in1){
+    // ■ muteXXXからの入力
+    inputMuteXXX(in1);
+} else if (@in2) {
+    // ■ LaunchPadからの入力
+    // note:launchpadのボタンを押したタイミングでcontrol value = 127、
+    // 離したタイミングで value = 0が送られる。
+
+    // 押された場所の取得
+    static uint8_t x;
+    static uint8_t y;
+    Lp3::getLocation(in2,&x,&y);
+    // muteBox外の入力は処理しない。
+    if(y>=MB_LOC && y<MB_LOC+2) {
+        y-=MB_LOC; // y軸補正
+        inputLaunchPad(x,y,in2.getControlValue());
+    }
+
+} else if (@in3) {
+    // ■ patternBoxからの入力
+    inputPatternBox(in3);
+}
+
+// バッファがあればlaunchpadに送信
+if(0<mpDispLp3->size()){
+    out1 = mpDispLp3;
+}
+
+

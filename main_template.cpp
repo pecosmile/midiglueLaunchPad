@@ -90,6 +90,19 @@ static const uint8_t LP3K_LOGO = 99;
 **********************************************/
 
 /*********************************************
+ * MuteBox用定数 start
+**********************************************/
+static const uint8_t LP3_MB_MODE = 0x03;            // muteBox モード：モードマスク
+static const uint8_t LP3_MB_MODE_PLAY = 0x01;       // muteBox モード；演奏中
+static const uint8_t LP3_MB_MODE_EDIT_ST = 0x02;    // muteBox モード；編集モード開始
+static const uint8_t LP3_MB_MODE_EDIT_ED = 0x03;    // muteBox モード；編集モード終了
+static const uint8_t LP3_MB_REFRESH_MUTE = 0x40;    // MUTEBOX リフレッシュ
+/*********************************************
+ * MuteBox用定数 end 
+**********************************************/
+
+
+/*********************************************
  * Launch Pad光点設定用のメソッド start
 **********************************************/
 class Lp3 {
