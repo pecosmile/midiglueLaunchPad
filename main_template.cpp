@@ -28,10 +28,6 @@
  */
 
 #include "midiglue_node.h"
-// #include "./lp3/launch_pad_mk3.h"
-// #include "./lp3/Lp3Light.hpp"
-// #include "./lp3/MeasureDispFuc.hpp"
-// #include "./lp3/PatternBox.hpp"
 
 /*
     If you want to define your own global functions, classes, and variables, write them here.

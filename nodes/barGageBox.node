@@ -1,0 +1,198 @@
+<Comment>
+barGageBox
+
+
+kokou ni-sui@sabaco
+
+<I/O>
+input Int : LaunchPad制御（0=Disable）
+input MidiPacket : clock入力
+input MidiPacket : launchpadからの入力
+output IntList : launchpadへの出力
+
+
+<Description>
+
+※ノード単体では動きません。main_template.cppに、専用の定数・クラスを設定する必要があります。
+
+
+<Parameter>
+parameter Locate = 0 : 描画位置(0-6)
+parameter Height = 4 : 描画範囲(2-8)
+
+<Setup>
+// Bung設定
+${this}( &(Midiglue::__bang) , Midiglue::SETUP );
+
+<Code>
+
+/*********************************************
+ * 定数
+**********************************************/
+static const uint8_t LOCATE_Y = ${Locate};  // 基準位置（縦）
+static const uint8_t BOXSIZE_X = 8;         // サイズ（横）
+
+// システムパケット
+static const auto CLOCK = MidiPacket::makeTimingClock();
+static const auto STOP = MidiPacket::makeTimingClockStop();
+static const auto START = MidiPacket::makeTimingClockStart();
+static const auto CONTINUE = MidiPacket::makeTimingClockContinue();
+
+// 1ステップ/クロック
+static const uint8_t CLOCK4STEP = 24*4;
+
+// 1ステップ/クロック
+static const uint8_t COLOR_A = LP3C_PURPLE;
+static const uint8_t COLOR_B = LP3C_L_GREEN;
+static const uint8_t COLOR_BACK = LP3C_BLACK;
+
+// ステータス
+static const uint8_t ST_PLAING = 0x80;
+
+
+/*********************************************
+ * 変数
+**********************************************/
+// Launchpad 描画情報
+static IntList mpDispLp3 = Midiglue::init_default<IntList>();
+
+// カウント
+static uint8_t clockCount = 0;
+static uint8_t barCount = 0;
+static uint8_t barLength = 8;
+static uint8_t mStatus = 0;
+
+
+/*********************************************
+ * 関数
+**********************************************/
+
+// 再描画
+static auto reDrow = [&](){
+    for(int x=0;x<LP3_maxXY;x++){
+        uint8_t color = COLOR_BACK;
+
+        if( x<barCount+1 ){
+            color = COLOR_B;
+        } else if( x<barLength ){
+            color = COLOR_A;
+        }
+        // 描画
+        Lp3::addDot(mpDispLp3,LP3B_NOMAL,x,LOCATE_Y,color);
+    }
+
+};
+
+// 初期化
+static auto initDrow = [&](){
+    mpDispLp3->clear();
+    reDrow();
+    out0 = mpDispLp3;
+};
+
+
+
+/*****************
+ * LaunchPadからの入力
+ * @param x 押されたボタンのX軸(0～8)
+ * @param y 押されたボタンのy軸(0～8)
+ * @param value value値
+ */
+static auto pushButtun = [&](uint8_t x,uint8_t y,uint8_t value){
+    // Midiglue::Debug::write_log("inputProgramChange", x*10+y);
+ 
+    // boxの範囲内であることを確認(縦)
+    if(y != LOCATE_Y){
+        return;
+    }
+
+    // boxの範囲内であることを確認(横)
+    if(x<LP3_maxXY){
+    }
+    else { // ボックスの右側[>] が押されている。
+    }
+
+};
+
+// 入力：LaunchPad
+static auto inputLaunchPad = [&](MidiPacket packet){
+    // LaunchPadからの入力
+    // 押された場所の取得
+    static uint8_t x;
+    static uint8_t y;
+    if(Lp3::getLocation(packet,&x,&y)){
+    }else {
+        // そのほかのボタン
+        pushButtun(x,y,packet.getControlValue());
+    };
+
+
+};
+
+/*********************************************
+* クロック情報
+**********************************************/
+static auto inputClock = [&](MidiPacket packet){
+    // init bung
+    if(packet == CLOCK && 0 < (mStatus&ST_PLAING) ){
+        // clock信号
+        clockCount = (++clockCount)%CLOCK4STEP;
+        // CLOCK4STEP毎に１ブロック進む
+        if(0 == clockCount){
+            // 小節カウント
+            barCount = (++barCount)%barLength;
+            if(barCount == 0) {
+                reDrow(); // 再描画
+            } else {
+                // 描画
+                Lp3::addDot(mpDispLp3,LP3B_NOMAL,barCount,LOCATE_Y,COLOR_B);
+            }
+        }
+
+    }else if(packet == START || packet == CONTINUE) {
+        // 再生ステータス設定
+        mStatus |= ST_PLAING;
+    }
+    else if(packet == STOP){
+        // 再生状況をリセットする。
+        clockCount = 0;
+        barCount = 0;
+        reDrow();
+        // 再生ステータス設定
+        mStatus &= (~ST_PLAING);
+    }
+
+};
+
+
+/*********************************************
+* 割り込みイベント
+**********************************************/
+// LaunchPadの初期表示
+static auto initEvent = Midiglue::make_oneshot_us_event<>(initDrow);
+
+/*********************************************
+* 実行処理
+**********************************************/
+
+// バッファクリア
+mpDispLp3->clear();
+
+// セットアップ
+if (@setup){
+    // 3秒後に初期表示処理を呼び出す
+    initEvent->schedule(3000 * 1000);
+}
+else if (@in0) { // Clock入力
+}
+else if (@in1) { // Clock入力
+    inputClock(in1);
+}
+else if (@in2) { // LaunchPadからの入力
+    inputLaunchPad(in2);
+}
+
+// バッファがあればlaunchpadに送信
+if(0<mpDispLp3->size()){
+    out0 = mpDispLp3;
+}

@@ -59,6 +59,9 @@ static const uint8_t mColor[8] = {
 static const uint8_t CL_NOW = LP3C_WHITE;
 // 色：選択中プログラム
 static const uint8_t CL_SETTING = LP3C_BL_PURPLE;
+// 色：上下カーソル
+static const uint8_t CL_CURSOR_UP   = LP3C_L_YELLOW;
+static const uint8_t CL_CURSOR_DOWN = LP3C_L_YELLOW;
 
 // ステータス
 static const uint8_t ST_IDOL = 0;       // IDOL
@@ -172,6 +175,9 @@ static auto reDrow = [&](){
             ++prgNo;
         }
     }
+    // カーソル
+    Lp3::addDot(mpDispLp3,LP3B_NOMAL,8,LOCATE_Y + 0,CL_CURSOR_UP);
+    Lp3::addDot(mpDispLp3,LP3B_NOMAL,8,LOCATE_Y + 1,CL_CURSOR_DOWN);
 };
 
 
@@ -196,6 +202,24 @@ static auto inputPrgChange = [&](uint8_t prgNo){
     drowProglamNo(mNowPrgNo);
 };
 
+
+// 入力：カーソルキーを押している場合
+static auto inputScrool = [&](int vactor) -> bool {
+    // スクロール
+    uint8_t moveTo = mScrool + vactor;
+    // スクロールの最大値を越える場合は処理出来ない
+    // ※結果が0未満の場合もオーバーフローによって最大値を超える
+    if(moveTo > (SCROOL_MAX - BOXSIZE_Y) ) {
+        return(true);
+    }
+    // スクロール位置を移動して再描画
+    mScrool = moveTo;
+    reDrow();
+    return(true);
+};
+
+
+
 /*****************
  * LaunchPadからの入力
  * @param x 押されたボタンのX軸(0～8)
@@ -213,13 +237,10 @@ static auto inputProgramChange = [&](uint8_t x,uint8_t y,uint8_t value){
         return;
     }
 
-    // y軸補正
-    y += (mScrool - LOCATE_Y);
-
-    Midiglue::Debug::write_log("inputProgramChange", x*10+y);
-
     // boxの範囲内であることを確認(横)
     if(x<LP3_maxXY){
+        // y軸補正
+        y += (mScrool - LOCATE_Y);
         // progNo
         uint8_t prgNo = x + y*LP3_maxXY;
         // program No の変更
@@ -233,45 +254,17 @@ static auto inputProgramChange = [&](uint8_t x,uint8_t y,uint8_t value){
         out0 = packet;
     }
     else { // ボックスの右側[>] が押されている。
-
+        // スクロール処理
+        if(0<value){
+            if(y==0) { inputScrool(-1); }
+            if(y==1) { inputScrool(+1); }
+        }
     }
 
 };
-
-// 入力：カーソルキーを押している場合
-static auto inputScrool = [&](MidiPacket midi) -> bool {
-    // 処理不要の場合はfalseを返す
-    uint8_t cc = midi.getControlNumber();
-    if(midi.getControlValue() == 0 ||
-        (cc != SCROOL_UP && cc != SCROOL_DOWN)) {
-        return(false);
-    }
-
-    // スクロール方向を決める
-    int vactor = (cc == SCROOL_UP) ? -1 : +1;
-    // スクロール
-    uint8_t moveTo = mScrool + vactor;
-    // スクロールの最大値を越える場合は処理出来ない
-    // ※結果が0未満の場合もオーバーフローによって最大値を超える
-    if(moveTo > (SCROOL_MAX - BOXSIZE_Y) ) {
-        return(true);
-    }
-    // スクロール位置を移動して再描画
-    mScrool = moveTo;
-    reDrow();
-    return(true);
-};
-
 
 // 入力：LaunchPad
 static auto inputLaunchPad = [&](MidiPacket midi){
-
-    // LaunchPadからの入力
-
-    // スクロール処理
-    if(inputScrool(midi)) {
-        return;
-    }
 
     // 押された場所の取得
     static uint8_t x;
