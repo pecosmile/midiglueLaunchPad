@@ -9,6 +9,7 @@ input Int : LaunchPad制御（0=Disable）
 input MidiPacket : clock入力
 input MidiPacket : launchpadからの入力
 output IntList : launchpadへの出力
+output Int : BarLength完了時 Bung
 
 
 <Description>
@@ -142,6 +143,7 @@ static auto inputClock = [&](MidiPacket packet){
             // 小節カウント
             barCount = (++barCount)%barLength;
             if(barCount == 0) {
+                out1 = 1;
                 reDrow(); // 再描画
             } else {
                 // 描画
@@ -183,7 +185,7 @@ if (@setup){
     // 3秒後に初期表示処理を呼び出す
     initEvent->schedule(3000 * 1000);
 }
-else if (@in0) { // Clock入力
+else if (@in0) { // enable
 }
 else if (@in1) { // Clock入力
     inputClock(in1);

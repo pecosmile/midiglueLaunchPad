@@ -9,6 +9,7 @@ input Int : LaunchPad制御（0=Disable）
 input IntList : ミュート処理情報(muteXXX)
 input MidiPacket : ボタン入力情報(LaunchPad) 
 input IntList : パターン処理情報(patternBox)
+input Int : muteLock解除bung(1を受けるとmuteLock解除)
 output IntList : ミュート処理情報(muteXXX)
 output IntList : 描画情報(lpControl)
 output IntList : パターン処理情報(patternBox)
@@ -31,6 +32,11 @@ ${this}( &(Midiglue::__bang) , Midiglue::SETUP );
  *****/
 // 描画位置
 static const uint8_t MB_LOC = ${locate};
+
+// muteButtun
+static uint8_t CR_MUTE_LOCK = LP3C_D_RED;
+static uint8_t CR_MUTE_UNLOCK = LP3C_LGY_BLUE;
+static uint8_t CR_SOLO = LP3C_L_ORANGE;
 
 
 /*****
@@ -95,6 +101,24 @@ static auto getColor = [&](uint8_t x,uint8_t y) -> uint8_t {
 };
 
 
+
+/*****************
+ * muteボタンの描画
+ */
+static auto drowMuteButtun = [&](){
+
+    uint8_t mode  = LP3B_NOMAL;
+    uint8_t color = CR_MUTE_UNLOCK;
+    if(flagMuteLock){
+        mode  = LP3B_PULS;
+        color = CR_MUTE_LOCK;
+
+    }
+
+    Lp3::addDot(mpDispLp3,mode      ,8,MB_LOC    ,color);       // muteLockボタンの設定
+    Lp3::addDot(mpDispLp3,LP3B_NOMAL,8,MB_LOC + 1,CR_SOLO);     // mute/solo ボタン
+};
+
 /*****************
  * 表示のreDrow
  */
@@ -104,6 +128,7 @@ static auto reDrow = [&](){
         uint8_t x = i%LP3_maxXY;
         Lp3::addDot(mpDispLp3,0,x,MB_LOC + y,getColor(x,y));
     }
+    drowMuteButtun();
 };
 
  // 初期化
@@ -161,10 +186,6 @@ static auto inputMuteXXX = [&](IntList buff){
         for(int i=0;i<16;i++) {
             colorInfo[i] = buff->at(i);
         }
-        // ボタンの描画
-        reDrow();                                          // 全ボタンの描画
-        Lp3::addDot(mpDispLp3,2,8,MB_LOC,LP3C_BLUE);          // muteLockボタンの設定
-        Lp3::addDot(mpDispLp3,2,8,MB_LOC + 1,LP3C_WHITE);     // mute/solo ボタン
     }
     else if(2 == buff->size()) { // バッファサイズが2の場合、mute処理
         // ミュートステータス設定
@@ -172,6 +193,23 @@ static auto inputMuteXXX = [&](IntList buff){
         muteGBox[1] = buff->at(1);
         reDrow();
     }
+};
+
+/*****************
+ * muteLock解除処理
+ */
+static auto freeMuteLock = [&](){
+    // 特にロックされていない場合は処理しない
+    if(flagMuteLock == false){
+        return;
+    }
+
+    // muteLock 解除
+    flagMuteLock = false;
+    // launchpad リフレッシュ
+    reDrow();
+    // 操作情報をpatternBox or grooveBoxに送信
+    sendMuteOperationData(LP3_MB_REFRESH_MUTE);
 };
 
 
@@ -215,21 +253,25 @@ static auto inputLaunchPad = [&](uint8_t x,uint8_t y,uint8_t value){
         // muteLockボタン処理
         // -----------------
             if(value > 0){
-                flagMuteLock = true;
-            }
-            else {
-                flagMuteLock = false;
-                // launchpad リフレッシュ
-                reDrow();
-
-                // 操作情報をpatternBox or grooveBoxに送信
-                sendMuteOperationData(LP3_MB_REFRESH_MUTE);
+                if(!flagMuteLock){
+                    // muteLock ON
+                    flagMuteLock = true;
+                    drowMuteButtun();
+                }
+                else
+                {
+                    freeMuteLock();
+                }
             }
         } else if(y==1) {
         // -----------------
         // mute/soloボタン処理
         // -----------------
             if(value > 0){ // 押したとき
+                // 押したタイミングでmuteLockは解除
+                flagMuteLock = false;
+                drowMuteButtun();
+                // solo処理に対してのフラグ設定
                 flagSoloLock = true;
                 flagUnMute = true;
             } else { // 離したとき
@@ -345,6 +387,11 @@ else if (@in1){
 } else if (@in3) {
     // ■ patternBoxからの入力
     inputPatternBox(in3);
+} else if (@in4) {
+    // ■ free muteLock
+    if(in4 == 1){
+        freeMuteLock();
+    }
 }
 
 // バッファがあればlaunchpadに送信
