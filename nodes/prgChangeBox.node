@@ -254,6 +254,8 @@ static auto inputProgramChange = [&](uint8_t x,uint8_t y,uint8_t value){
         out0 = packet;
     }
     else { // ボックスの右側[>] が押されている。
+        // y軸補正
+        y += (mScrool - LOCATE_Y);
         // スクロール処理
         if(0<value){
             if(y==0) { inputScrool(-1); }
