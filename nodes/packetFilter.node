@@ -1,0 +1,58 @@
+<Comment>
+packetFilter
+    NoteOn/NoteOff/CCを設定値によって振り分ける
+
+kokou ni-sui@sabaco
+
+<I/O>
+input MidiPacket : MIDI入力（Digitakt）
+output MidiPacket : MIDI出力(true)(Digitakt)
+output MidiPacket : MIDI出力(false)(Digitakt)
+
+<Description>
+パケットを振り分ける
+NoteOn/NoteOff/CCを設定値によって振り分けます
+
+<Parameter>
+parameter flagCC = true : CC
+parameter flagNoteOn = true : NoteOn
+parameter flagNoteOff = true : NoteOff
+
+<Setup>
+
+<Code>
+
+
+/*********
+ * パケット振り分け
+ ********/
+ static auto sendPacket = [&](bool outFlag,MidiPacket packet){
+     if(outFlag){
+        out0 = packet;
+     } else {
+        out1 = packet;
+     }
+};
+
+
+/*********************************************
+* 実行処理
+**********************************************/
+
+
+if(@in0) {
+    if(in0.isControlChange()){
+        // CC
+        sendPacket(${flagCC},in0);
+
+    } else if(in0.isNoteOn()){
+        // NoteOn
+        sendPacket(${flagNoteOn},in0);
+
+    } else if(in0.isNoteOff()){
+        // NoteOn
+        sendPacket(${flagNoteOff},in0);
+
+    }
+
+}
