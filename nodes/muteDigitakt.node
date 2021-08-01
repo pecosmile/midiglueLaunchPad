@@ -22,6 +22,8 @@ TODO:後で書く
 parameter ChannelTbl = "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16" : Digitaktのチャネルテーブル。
 parameter ReserveAutoCh = false : 最終パート(MIDI H,part 16)を、auto channel 用に使用します。
 parameter PatternMute = false : GLOBAL Muteではなく、PATTERN Muteに対して処理を行います。
+parameter ExtendMuteCh = 16 : Extend Mute に使用するチャンネル（1-16）
+parameter ExtendMuteCC = 119 : Extend Mute に使用するCC（1-127）
 
 <Setup>
 // Bung設定
@@ -37,6 +39,13 @@ static const std::vector<uint8_t> channelTbl{${ChannelTbl}};
 static const Midiglue::MIDICCType DTKCC_GMute = (Midiglue::MIDICCType) 94;
 static const Midiglue::MIDICCType DTKCC_PMute = (Midiglue::MIDICCType) 110;
 static const Midiglue::MIDICCType DTKCC_Mute = ${PatternMute} ? DTKCC_PMute : DTKCC_GMute;
+static const Midiglue::MIDICCType DTKCC_MuteExMute = (Midiglue::MIDICCType) ${ExtendMuteCC};
+
+// 4bit単位で順番の前後を入れ替える
+static const uint8_t tblBitRev[] = {
+    0b0000,0b1000,0b0100,0b1100,0b0010,0b1010,0b0110,0b1110,
+    0b0001,0b1001,0b0101,0b1101,0b0011,0b1011,0b0111,0b1111,
+    };
 
 
 /*****
@@ -47,21 +56,14 @@ static IntList pOutList = Midiglue::init_default<IntList>();
 // 現在のMuteステータス
 static uint8_t muteStatus[2];
 
-/*****************
- * Cc入力処理
- */
-static auto inputCcPacket = [&](MidiPacket packet){
 
-    // control change以外は処理なし
-    if(!packet.isControlChange()){
-        return;
-    }
-    // control change以外は処理なし
-    if(packet.getControlNumber() != (uint8_t)DTKCC_Mute){
-        return;
-    }
-    Midiglue::Debug::write_log("inputCcPacket", packet.getControlNumber());
-    Midiglue::Debug::write_log("channel", packet.getChannel());
+/*****************
+ * mute CC Packet処理
+ */
+static auto inputCcMutePacket = [&](MidiPacket packet){
+
+    // Midiglue::Debug::write_log("inputMutePacket", packet.getControlNumber());
+    // Midiglue::Debug::write_log("channel", packet.getChannel());
 
     uint8_t channel = packet.getChannel() - 1;
     uint8_t value = packet.getControlValue();
@@ -70,7 +72,6 @@ static auto inputCcPacket = [&](MidiPacket packet){
     uint8_t s = channel % LP3_maxXY;
 
     uint8_t mask = (0x80 >> s);
-
 
     if(value == 0) {
         muteStatus[i] = muteStatus[i] | mask;
@@ -83,6 +84,132 @@ static auto inputCcPacket = [&](MidiPacket packet){
     pOutList->push_back(muteStatus[1]);
 
     out1 = pOutList;
+
+};
+
+
+
+/*****************
+ * 
+ * flgRefresh:全データ送信フラグ
+ * muteData[]:muteデータ（２バイト）
+ */
+static auto extendMute = [&](bool flgRefresh,uint8_t* muteData){
+
+    // 
+    for(uint8_t y=0;y<2;y++){
+
+        // ステータスと入力値のXOR
+        uint8_t datXor = muteStatus[y] ^ muteData[y];
+        // 全データ送信不要かつ、8bitが一致していたらcountinue
+        if(!flgRefresh && datXor == 0)
+        {   continue;   }
+        // 8bit内の処理
+        uint8_t mask = 0x80;
+        for(uint8_t x=0;x<LP3_maxXY;x++) {
+            uint8_t i = y*LP3_maxXY+x;
+            // reserve auto ch の場合、最終chは処理しない。
+            if(reserveAutoCh && i == 15) { continue; }
+
+            // 全データ送信もしくは、対応bitに変更がある場合のみ送信。
+            if(flgRefresh || (0<(mask & datXor)))
+            {   // digitaktにccを送る
+                uint8_t channel =  channelTbl.at(i);           // チャンネル
+                uint8_t dat = (0<(mask & muteData[y])) ? 0:127;  // on(0)/off(127)
+                out0 = MidiPacket::makeControlChange(channel,DTKCC_Mute,dat);
+            }
+
+            mask = mask >> 1;
+        }
+        // ステータスを設定
+        muteStatus[y] = muteData[y];
+    }
+
+};
+
+
+/**
+ * muteの設定変更
+ * target:変更対象
+ * value:cc value
+ */
+static auto updateMuteMap = [&](uint8_t* target,uint8_t value){
+    uint8_t y = 0;
+    uint8_t mask = 0;
+    // valueの値で更新するmuteの位置を確定させる
+    if(0<=value && value<16) {
+        value = value << 4;
+        mask = 0x0f;
+        y=0;
+    } else if(20<=value && value<36){
+        value = value - 20;
+        mask = 0xf0;
+        y=0;
+    } else if(40<=value && value<56){
+        value = value - 40;
+        value = value << 4;
+        mask = 0x0f;
+        y=1;
+    } else if(60<=value && value<76){
+        value = value - 60;
+        mask = 0xf0;
+        y=1;
+    }
+    // valueに対応したデータを変更する。
+    target[y] = (target[y] & mask) | value;
+};
+
+/*****************
+ * extend mute CC Packet処理
+ * ※呼び出す前に、ccとチャンネルのチェックは済ませて下さい。
+ */
+static auto inputExtendMutePacket = [&](MidiPacket packet){
+    // Midiglue::Debug::write_log("inputExtendMutePacket", packet.getControlNumber());
+
+    // mute data
+    // このデータを変更して、muteを送る。
+    uint8_t muteData[2];
+    muteData[0] = muteStatus[0];
+    muteData[1] = muteStatus[1];
+
+    // muteDataを更新
+    updateMuteMap(muteData,packet.getControlValue());
+
+    // mute送信
+    extendMute(false,muteData);
+
+    // LaunchPadへの送信
+    pOutList->clear();
+    pOutList->push_back(muteStatus[0]);
+    pOutList->push_back(muteStatus[1]);
+
+    out1 = pOutList;
+
+};
+
+
+
+/*****************
+ * Cc入力処理
+ */
+static auto inputCcPacket = [&](MidiPacket packet){
+
+    // control change以外は処理なし
+    if(!packet.isControlChange()){
+        return;
+    }
+
+    // mute CC処理
+    if(packet.getControlNumber() == (uint8_t)DTKCC_Mute){
+        inputCcMutePacket(packet);
+    }
+
+    // Extend mute CC処理
+    if(packet.getChannel() == ${ExtendMuteCh} 
+        && packet.getControlNumber() == (uint8_t)DTKCC_MuteExMute){
+        inputExtendMutePacket(packet);
+    }
+
 
 };
 
@@ -105,32 +232,11 @@ if(@setup){
 
     // 全データ送信フラグ
     bool flgRefresh = ((3<=in1->size()) && 0<(in1->at(2)&LP3_MB_REFRESH_MUTE));
-    // 
-    for(uint8_t y=0;y<2;y++){
-
-        // ステータスと入力値のXOR
-        uint8_t datXor = muteStatus[y]^in1->at(y);
-        // 全データ送信不要かつ、8bitが一致していたらcountinue
-        if(!flgRefresh && datXor == 0)
-        {   continue;   }
-        // 8bit内の処理
-        uint8_t mask = 0x80;
-        for(uint8_t x=0;x<LP3_maxXY;x++) {
-            uint8_t i = y*LP3_maxXY+x;
-            // reserve auto ch の場合、最終chは処理しない。
-            if(reserveAutoCh && i == 15) { continue; }
-
-            // 全データ送信もしくは、対応bitに変更がある場合のみ送信。
-            if(flgRefresh || (0<(mask & datXor)))
-            {   // digitaktにccを送る
-                uint8_t channel =  channelTbl.at(i);           // チャンネル
-                uint8_t dat = (0<(mask & in1->at(y))) ? 0:127;  // on(0)/off(127)
-                out0 = MidiPacket::makeControlChange(channel,DTKCC_Mute,dat);
-            }
-
-            mask = mask >> 1;
-        }
-        // ステータスを設定
-        muteStatus[y] = in1->at(y);
-    }
+    // mute data
+    // このデータを変更して、muteを送る。
+    uint8_t muteData[2];
+    muteData[0] = in1->at(0);
+    muteData[1] = in1->at(1);
+    // mute送信
+    extendMute(flgRefresh,muteData);
 }

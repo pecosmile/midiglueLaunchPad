@@ -193,6 +193,9 @@ static auto initDrow = [&](){
 // 入力：プログラムチェンジ
 static auto inputPrgChange = [&](uint8_t prgNo){
 
+    // 
+    mSettingPrgNo = 0xff;    
+
     // program No の変更
     uint8_t oldPrgNo = mNowPrgNo;
     mNowPrgNo = prgNo;
