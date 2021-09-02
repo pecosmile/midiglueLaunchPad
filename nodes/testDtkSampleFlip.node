@@ -1,0 +1,247 @@
+<Comment>
+testDtkSampleFlip
+
+kokou ni-sui@sabaco
+
+<I/O>
+input Int : LaunchPad制御（0=Disable）
+input MidiPacket : clock入力
+input MidiPacket : launchpadからの入力
+output MidiPacket : proglam change出力
+output IntList : launchpadへの出力
+
+
+<Description>
+
+※ノード単体では動きません。main_template.cppに、専用の定数・クラスを設定する必要があります。
+
+
+<Parameter>
+parameter Locate = 0 : 描画位置(0-7)
+parameter Channel = 16 : チャンネル(1-16)
+parameter velocity = 100 : ベロシティ(1-127)
+
+<Setup>
+// Bung設定
+${this}( &(Midiglue::__bang) , Midiglue::SETUP );
+
+<Code>
+
+/*********************************************
+ * 定数
+**********************************************/
+static const uint8_t LOCATE_Y = ${Locate};  // 基準位置（縦）
+static const uint8_t BOXSIZE_X = 8;         // サイズ（横）
+static const uint8_t BOXSIZE_Y = 1;         // サイズ（縦）
+static const uint8_t MIDI_CH = ${Channel};  // チャンネル
+static const uint8_t VELOCITY = ${velocity};  // ベロシティ
+static const uint8_t CLOCK1NOTE = 6;        // 1Note内で送信するクロック
+
+// note stack status
+static const uint8_t ST_NO_STACK = 0x00;       // スタック無し
+static const uint8_t ST_NOTE_ON  = 0x01;       // ノートon待ち
+static const uint8_t ST_NOTE_OFF = 0x02;       // ノートoff待ち
+
+// システムパケット
+static const auto CLOCK = MidiPacket::makeTimingClock();
+static const auto STOP = MidiPacket::makeTimingClockStop();
+static const auto START = MidiPacket::makeTimingClockStart();
+static const auto CONTINUE = MidiPacket::makeTimingClockContinue();
+
+
+/*********************************************
+ * 変数
+**********************************************/
+// Launchpad 描画情報
+static IntList mpDispLp3 = Midiglue::init_default<IntList>();
+// LaunchPad入出力許可フラグ
+static bool lpEnable = true;
+// 再生ステータス
+static uint8_t mClockCount = CLOCK1NOTE;
+
+// noteStack
+static uint8_t mStackNote;
+static uint8_t mStackStatus;
+
+
+/*********************************************
+ * 関数
+**********************************************/
+
+// 再描画
+static auto reDrow = [&](){
+        // 指定した段の色を取得
+        for(int x=0;x<BOXSIZE_X;x++){
+            uint8_t color = LP3C_DK_GLAY;
+            uint8_t mode = LP3B_NOMAL;
+            // LP3への送信
+            Lp3::addDot(mpDispLp3,mode,x,LOCATE_Y,color);
+        }
+};
+
+// 初期化
+static auto initDrow = [&](){
+    mpDispLp3->clear();
+    reDrow();
+    out1 = mpDispLp3;
+};
+
+// note用の割り込み
+static std::shared_ptr<Midiglue::SingleEvent<void>> noteEvent;
+// ノートイベント
+static auto delayNote = [&](){
+    if(mStackStatus == ST_NOTE_ON){
+        // Note ON
+        auto packet = MidiPacket::makeNote(MIDI_CH,36,VELOCITY);
+        out0 = packet;
+        // ステータス
+        mStackStatus = ST_NOTE_OFF;
+        // event
+        noteEvent->schedule(100);
+    }else if(mStackStatus == ST_NOTE_OFF){
+        // Note OFF
+        auto packet = MidiPacket::makeNote(MIDI_CH,36,0);
+        out0 = packet;
+        // ステータス
+        mStackStatus = ST_NO_STACK;
+    }
+};
+// 割り込み設定
+noteEvent = Midiglue::make_oneshot_us_event<>(delayNote);
+
+/*****************
+ * 範囲内のボタン入力
+ * @param x 押されたボタンのX軸(0～8)
+ * @param value value値
+ */
+static auto sendNote = [&](int value){
+    // sampleFlip
+    {
+        auto packet = MidiPacket::makeControlChange(MIDI_CH,(Midiglue::MIDICCType)19,value);
+        out0 = packet;
+    }
+    // ステータス
+    mStackStatus = ST_NOTE_ON;
+    // イベント設定
+    noteEvent->schedule(100000);
+};
+
+
+/*****************
+ * 範囲内のボタン入力
+ * @param x 押されたボタンのX軸(0～8)
+ * @param value value値
+ */
+static auto push = [&](uint8_t x,uint8_t value){
+    // 入力不要
+    if(!lpEnable) { return; }
+    
+    // midi outへの出力
+    // CC
+    // 押したときだけ。
+    if(value > 0)
+    {
+        sendNote((int)40+x);
+    }
+};
+
+/*****************
+ * LaunchPadからの入力
+ * @param x 押されたボタンのX軸(0～8)
+ * @param y 押されたボタンのy軸(0～8)
+ * @param value value値
+ */
+static auto pushButtun = [&](uint8_t x,uint8_t y,uint8_t value){
+    // Midiglue::Debug::write_log("inputProgramChange", x*10+y);
+    // boxの範囲内であることを確認(縦)
+    if(y < LOCATE_Y || y >= (LOCATE_Y + BOXSIZE_Y)){
+        return;
+    }
+    // // y軸補正
+    // y -= LOCATE_Y;
+
+    // boxの範囲内であることを確認(横)
+    if(x<LP3_maxXY){
+        push(x,value);
+    }
+    else { // ボックスの右側[>] が押されている。
+
+    }
+
+};
+
+
+
+// 入力：LaunchPad
+static auto inputLaunchPad = [&](MidiPacket packet){
+    // LaunchPadからの入力
+    // 押された場所の取得
+    static uint8_t x;
+    static uint8_t y;
+    if(Lp3::getLocation(packet,&x,&y)){
+        // 最上段のボタンクリック
+        reDrow();
+    }else {
+        // そのほかのボタン
+        pushButtun(x,y,packet.getControlValue());
+    };
+
+
+};
+
+/*********************************************
+* クロック情報
+**********************************************/
+static auto inputClock = [&](MidiPacket packet){
+    // init bung
+    if(packet == CLOCK){
+        mClockCount -= 1;
+        if(mClockCount == 0){
+            mClockCount = CLOCK1NOTE;
+        }
+    }else if(packet == START || packet == CONTINUE) {
+        mClockCount = CLOCK1NOTE;
+    }
+    else if(packet == STOP){
+        mClockCount = CLOCK1NOTE;
+    }
+
+};
+
+/*********************************************
+* 割り込みイベント
+**********************************************/
+// LaunchPadの初期表示
+static auto initEvent = Midiglue::make_oneshot_us_event<>(initDrow);
+
+/*********************************************
+* 実行処理
+**********************************************/
+
+// バッファクリア
+mpDispLp3->clear();
+
+// セットアップ
+if (@setup){
+    // 3秒後に初期表示処理を呼び出す
+    initEvent->schedule(3000 * 1000);
+}
+else if (@in0){ // Enable
+    if (in0 == 0) {
+        lpEnable = false;
+    } else {
+        lpEnable = true;
+        reDrow();
+    }
+}
+else if (@in1) { // Clock入力
+    inputClock(in1);
+}
+else if (@in2) { // LaunchPadからの入力
+    inputLaunchPad(in2);
+}
+
+// バッファがあればlaunchpadに送信
+if(0<mpDispLp3->size()){
+    out1 = mpDispLp3;
+}
