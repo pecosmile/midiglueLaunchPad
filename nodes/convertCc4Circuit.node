@@ -11,10 +11,10 @@ output MidiPacket : MIDI出力(for circuit)
 <Description>
 
 <Parameter>
-parameter comvCc2Prg = 0 : プログラムチェンジに変換するCC番号(0=off)
 parameter prgTargetCh = 16 : ターゲットとするチャンネル
 parameter subbassChannel = 1 : sub bass のchannel番号
-parameter subbassCtl = 0 : sub bass CC番号(0=off)
+parameter comvCc2Prg = 5 : プログラムチェンジに変換するCC番号(0=off)
+parameter subControlCc = 6 : subControlCc CC番号(0=off)
 
 
 <Setup>
@@ -31,6 +31,8 @@ static const uint8_t SUB_BASS_NOTE = 60;        // サブベースのノート
 static const uint8_t SBCC_KICKBASS_ON = 1;      // サブベースCC：キック・ベースON
 static const uint8_t SBCC_KICK_ONLY = 2;        // サブベースCC：キックのみ
 static const uint8_t SBCC_BASS_ONLY = 3;        // サブベースCC：ベースのみ
+static const uint8_t SLDRCC_Synth1_UP = 10;     // スライダCC：Synth1 Up
+static const uint8_t SLDRCC_Synth1_DOWN = 11;   // スライダCC：Synth1 Down
 
 
 /*********************************************
@@ -39,6 +41,36 @@ static const uint8_t SBCC_BASS_ONLY = 3;        // サブベースCC：ベース
 static uint8_t mSubBassNote = SUB_BASS_NOTE;
 static bool mEnableSubBass = true;
 static bool mEnableSubKick = true;
+
+
+
+/*********
+ * sub control change
+ ********/
+ static auto subControlCcPacket = [&](MidiPacket packet){
+     uint8_t ctrlNo = (uint8_t) packet.getControlNumber();
+     uint8_t ctrlValue = (uint8_t) packet.getControlNumber();
+
+    switch(ctrlValue){
+    case SBCC_KICKBASS_ON:  // キック・ベース ON
+        mEnableSubKick = true;
+        mEnableSubBass = true;
+        break;
+    case SBCC_KICK_ONLY:    // キックのみ
+        mEnableSubKick = true;
+        mEnableSubBass = false;
+        break;
+    case SBCC_BASS_ONLY:    // ベースのみ
+        mEnableSubKick = false;
+        mEnableSubBass = true;
+        break;
+    case SLDRCC_Synth1_UP:    // Synth1 Up
+        break;
+    case SLDRCC_Synth1_DOWN:    // Synth1 Down
+        break;
+    }
+
+ };
 
 
 /*********
@@ -53,20 +85,8 @@ static bool mEnableSubKick = true;
         auto packet = MidiPacket::makeProgramChange(${prgTargetCh},prgNo);
         // midi outへの出力
         out0 = packet;
-     }else if(ctrlNo == ${subbassCtl}){
-        uint8_t ctrlValue = (uint8_t) packet.getControlValue();
-
-        // キック・サブベースベース変更
-        if(ctrlValue == SBCC_KICKBASS_ON){
-            mEnableSubKick = true;
-            mEnableSubBass = true;
-        }else if(ctrlValue == SBCC_KICK_ONLY){
-            mEnableSubKick = true;
-            mEnableSubBass = false;
-        }else if(ctrlValue == SBCC_BASS_ONLY){
-            mEnableSubKick = false;
-            mEnableSubBass = true;
-        }
+     }else if(ctrlNo == ${subControlCc}){
+         subControlCcPacket(packet);
      } else {
         // 上記以外のCCは無視
         out0 = packet;

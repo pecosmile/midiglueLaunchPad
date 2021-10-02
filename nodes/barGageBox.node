@@ -9,7 +9,7 @@ input Int : LaunchPad制御（0=Disable）
 input MidiPacket : clock入力
 input MidiPacket : launchpadからの入力
 output IntList : launchpadへの出力
-output Int : BarLength完了時 Bung
+output Int : 現在位置を数値で渡す Bung
 
 
 <Description>
@@ -144,13 +144,14 @@ static auto inputClock = [&](MidiPacket packet){
             // 小節カウント
             barCount = (++barCount)%barLength;
             if(barCount == 0) {
-                out1 = 1;
                 reDrow(); // 再描画
             } else {
                 // 描画
                 Lp3::addDot(mpDispLp3,LP3B_NOMAL,barCount,LOCATE_Y,COLOR_B);
             }
         }
+        // クロックが全体のどこにあるのかを返す
+        out1 = (barLength * CLOCK4STEP) - (clockCount + barCount * CLOCK4STEP) - 1;
 
     }else if(packet == START || packet == CONTINUE) {
         // 再生ステータス設定
