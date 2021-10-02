@@ -39,10 +39,10 @@ static const Midiglue::MIDICCType DTKCC_GMute = (Midiglue::MIDICCType) 94;
 static const Midiglue::MIDICCType DTKCC_PMute = (Midiglue::MIDICCType) 110;
 static const Midiglue::MIDICCType DTKCC_Mute = ${PatternMute} ? DTKCC_PMute : DTKCC_GMute;
 // Extend Mute A～D
-static const uint8_t DTKCC_MuteExMuteA = 116;
-static const uint8_t DTKCC_MuteExMuteB = 117;
-static const uint8_t DTKCC_MuteExMuteC = 118;
-static const uint8_t DTKCC_MuteExMuteD = 119;
+static const uint8_t DTKCC_MuteExMuteA = 1;
+static const uint8_t DTKCC_MuteExMuteB = 2;
+static const uint8_t DTKCC_MuteExMuteC = 3;
+static const uint8_t DTKCC_MuteExMuteD = 4;
 
 // 4bit単位で順番の前後を入れ替える
 static const uint8_t tblBitRev[] = {
@@ -222,8 +222,8 @@ static auto inputCcPacket = [&](MidiPacket packet){
         inputExtendMutePacket(packet);
     }
     else {
-        Midiglue::Debug::write_log("ch", packet.getChannel());
-        Midiglue::Debug::write_log("CC", packet.getControlNumber());
+        // Midiglue::Debug::write_log("ch", packet.getChannel());
+        // Midiglue::Debug::write_log("CC", packet.getControlNumber());
 
     }
 

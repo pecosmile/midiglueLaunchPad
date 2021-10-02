@@ -1,0 +1,119 @@
+<Comment>
+convertCc4Circuit
+    circuitへのパケットの変換・フィルター
+
+kokou ni-sui@sabaco
+
+<I/O>
+input MidiPacket : MIDI入力
+output MidiPacket : MIDI出力(for circuit)
+
+<Description>
+
+<Parameter>
+parameter comvCc2Prg = 0 : プログラムチェンジに変換するCC番号(0=off)
+parameter prgTargetCh = 16 : ターゲットとするチャンネル
+parameter subbassChannel = 1 : sub bass のchannel番号
+parameter subbassCtl = 0 : sub bass CC番号(0=off)
+
+
+<Setup>
+
+<Code>
+
+/*********************************************
+ * 定数
+**********************************************/
+static const uint8_t DRUM_CH = 10;              // ドラムのチャンネル
+static const uint8_t DRUM_NOTE = 60;            // ドラムのノート
+static const uint8_t SUB_BASE_VELOCITY = 127;   // サブベースのベロシティ
+static const uint8_t SUB_BASS_NOTE = 60;        // サブベースのノート
+static const uint8_t SBCC_KICKBASS_ON = 1;      // サブベースCC：キック・ベースON
+static const uint8_t SBCC_KICK_ONLY = 2;        // サブベースCC：キックのみ
+static const uint8_t SBCC_BASS_ONLY = 3;        // サブベースCC：ベースのみ
+
+
+/*********************************************
+ * 変数
+**********************************************/
+static uint8_t mSubBassNote = SUB_BASS_NOTE;
+static bool mEnableSubBass = true;
+static bool mEnableSubKick = true;
+
+
+/*********
+ * 16ch program change 変更
+ ********/
+ static auto convert16CcPacket = [&](MidiPacket packet){
+     uint8_t ctrlNo = packet.getControlNumber();
+     if(ctrlNo == ${comvCc2Prg}){
+        // progNo
+        uint8_t prgNo = (uint8_t) packet.getControlValue();
+        // programChangeに変換
+        auto packet = MidiPacket::makeProgramChange(${prgTargetCh},prgNo);
+        // midi outへの出力
+        out0 = packet;
+     }else if(ctrlNo == ${subbassCtl}){
+        uint8_t ctrlValue = (uint8_t) packet.getControlValue();
+
+        // キック・サブベースベース変更
+        if(ctrlValue == SBCC_KICKBASS_ON){
+            mEnableSubKick = true;
+            mEnableSubBass = true;
+        }else if(ctrlValue == SBCC_KICK_ONLY){
+            mEnableSubKick = true;
+            mEnableSubBass = false;
+        }else if(ctrlValue == SBCC_BASS_ONLY){
+            mEnableSubKick = false;
+            mEnableSubBass = true;
+        }
+     } else {
+        // 上記以外のCCは無視
+        out0 = packet;
+     }
+};
+
+/*********
+ * Note処理
+ ********/
+static auto noteFunction = [&](MidiPacket packet){
+
+    // channel が一致する場合はsub bass 送信
+    if(packet.getChannel() == DRUM_CH && packet.getNoteNumber() == DRUM_NOTE){
+        // note ON | OFF
+        uint8_t velocity = packet.isNoteOff() ? 0 : SUB_BASE_VELOCITY;
+        // sub base用のnote送信
+        // ※Note Off はステータス無関係に送信する（音が止まらなくなる為）
+        if(mEnableSubBass || packet.isNoteOff()){
+            out0 = MidiPacket::makeNote(${subbassChannel},mSubBassNote,velocity);
+        }
+        // kick用のnote送信
+        if(mEnableSubKick || packet.isNoteOff()){
+            out0 = packet;
+        }
+    } else{
+        // Noteそのものはスルーする
+        out0 = packet;
+    }
+
+};
+
+
+
+/*********************************************
+* 実行処理
+**********************************************/
+if(@in0) {
+
+    if(in0.getChannel() == ${prgTargetCh} && in0.isControlChange()){
+        // 指定チャンネルのCCのみ処理を行う
+        convert16CcPacket(in0);
+    } else if( in0.isNote() ){
+        noteFunction(in0);
+    } else if( in0.isProgramChange()){
+        // programChangeは排除
+    } else {
+        out0 = in0;
+    }
+
+}
