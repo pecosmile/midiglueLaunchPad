@@ -6,6 +6,8 @@ kokou ni-sui@sabaco
 
 <I/O>
 input MidiPacket : MIDI入力
+input Int : barGageBoxから取得する現在位置クロック
+input Int : サブベースのノート
 output MidiPacket : MIDI出力(for circuit)
 
 <Description>
@@ -33,6 +35,10 @@ static const uint8_t SBCC_KICK_ONLY = 2;        // サブベースCC：キック
 static const uint8_t SBCC_BASS_ONLY = 3;        // サブベースCC：ベースのみ
 static const uint8_t SLDRCC_Synth1_UP = 10;     // スライダCC：Synth1 Up
 static const uint8_t SLDRCC_Synth1_DOWN = 11;   // スライダCC：Synth1 Down
+// CCSliderステータス
+static const uint8_t SLDRCC_ST_IDLE = 0;    // アイドル
+static const uint8_t SLDRCC_ST_CCWAIT = 1;    // CC Wait
+static const uint8_t SLDRCC_ST_EXECUTE = 2;    // 実行
 
 
 /*********************************************
@@ -42,7 +48,14 @@ static uint8_t mSubBassNote = SUB_BASS_NOTE;
 static bool mEnableSubBass = true;
 static bool mEnableSubKick = true;
 
+static uint8_t mSldCcNumber = 0;        // 対象とするCC Number
+static uint8_t mSldCcValue = 0;         // 開始|終了の値
+static uint8_t mSldCcOutValue = 0;      // 最後に出力した値
+static uint8_t mSldCcStart = 0;         // 開始位置
+static uint8_t mSldCcKind = 0;          // 種別
+static uint8_t mSldCcStatus = 0;        // ステータス
 
+static uint8_t mClockCount = 0;          // クロックカウント
 
 /*********
  * sub control change
@@ -65,11 +78,33 @@ static bool mEnableSubKick = true;
         mEnableSubBass = true;
         break;
     case SLDRCC_Synth1_UP:    // Synth1 Up
-        break;
     case SLDRCC_Synth1_DOWN:    // Synth1 Down
+        // 対象のCC値を待機
+        mSldCcKind = ctrlValue; 
+        mSldCcStatus = SLDRCC_ST_CCWAIT;
         break;
     }
 
+ };
+
+/*********
+ * CCの値に対しての処理
+ ********/
+ static auto otherCcFunction = [&](MidiPacket packet){
+
+     if(mSldCcStatus == SLDRCC_ST_CCWAIT){
+        // Wait状態になってから最初に得たCCと、そのタイミングを取得する。
+        mSldCcNumber = packet.getControlNumber();
+        mSldCcValue = packet.getControlValue();
+        mSldCcStart = mClockCount;
+     } else if(mSldCcStatus == SLDRCC_ST_EXECUTE 
+        && mSldCcNumber == packet.getControlNumber()){
+        // Slider実行中に、同CCを無視する
+     } else {
+        // 上記以外はスルー
+        out0 = packet;
+
+     }
  };
 
 
@@ -86,10 +121,10 @@ static bool mEnableSubKick = true;
         // midi outへの出力
         out0 = packet;
      }else if(ctrlNo == ${subControlCc}){
-         subControlCcPacket(packet);
+        subControlCcPacket(packet);
      } else {
-        // 上記以外のCCは無視
-        out0 = packet;
+        // 上記以外のパケットは、更にCCSliderの処理を行う。 
+        otherCcFunction(packet);
      }
 };
 
@@ -118,6 +153,39 @@ static auto noteFunction = [&](MidiPacket packet){
 
 };
 
+/*********
+ * clock処理
+ ********/
+static auto clockFunction = [&](Int clock){
+    // mClockCount = clock;
+
+    // // 実行状態でないなら無視（何も送らない
+    // if(mSldCcStatus != SLDRCC_ST_EXECUTE){
+    //     return;
+    // }
+
+    // // 基準値
+    // uint8_t value = mSldCcValue;
+
+    // // clock は、小節開始が最大で、小節終わりに向けてカウントダウンしていく。
+    // // つまり mSldCcValue * (clock/mSldCcStart) は、開始から終わりにむかって減退していく
+    // value *= clock;
+    // value /= mSldCcStart;
+
+    // // upだった場合は状態を反転(終わりに向かって増加していく)
+    // if(mSldCcKind == SLDRCC_Synth1_UP){
+    //     value = mSldCcValue - value;
+    // }
+
+    // // 前回送ったvalueから変化があった場合にのみ送信
+    // if(mSldCcOutValue != value){
+    //     // CC を出力
+    //     out0 = MidiPacket::makeControlChange(${prgTargetCh},mSldCcNumber,value);
+    //     mSldCcOutValue = value;
+    // }
+
+
+};
 
 
 /*********************************************
@@ -136,4 +204,14 @@ if(@in0) {
         out0 = in0;
     }
 
+}
+
+if(@in1) {
+
+}
+
+if(@in2) {
+    // subbassの音程を変えるときにはnote offを送る（音が止まらなくなる為）
+    out0 = MidiPacket::makeNote(${subbassChannel},mSubBassNote,0);
+    mSubBassNote = in2;
 }
