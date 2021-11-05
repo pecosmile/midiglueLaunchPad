@@ -1,0 +1,234 @@
+<Comment>
+ccSlider
+
+TODO:複数のスライダーを使用可能にするアイディアがあるが、ここでは試さない。
+kokou ni-sui@sabaco
+
+<I/O>
+input MidiPacket : MIDI入力
+output MidiPacket : MIDI出力
+
+<Description>
+CCの値を自動で遷移させます。
+
+<Parameter>
+parameter commandCc = 1 : コマンド開始のCC
+
+<Setup>
+static const uint8_t CC_COMMAND_START = ${commandCc};
+// static const uint8_t CC_COMMAND_START = 1;
+
+<Code>
+
+/*****
+ * 定数
+ *****/
+static const uint8_t ST_IDLE = 0;           // ステータス：アイドル
+static const uint8_t ST_SETTING_START = 1;  // ステータス：セッティング-開始
+static const uint8_t ST_SETTING_END = 2;    // ステータス：セッティング-終了
+static const uint8_t ST_SLIDER = 3;         // ステータス：スライダー
+// システムパケット
+static const auto CLOCK = MidiPacket::makeTimingClock();
+static const auto STOP = MidiPacket::makeTimingClockStop();
+static const auto START = MidiPacket::makeTimingClockStart();
+static const auto CONTINUE = MidiPacket::makeTimingClockContinue();
+
+/*****
+ * 変数
+ *****/
+
+// ステータス
+static uint8_t mStatus = ST_IDLE;
+// スライダークロック
+static uint8_t mClockEnd = 0;
+static uint8_t mClock = 0;
+// チャンネル設定
+static uint8_t mChannel = 0;
+// 開始値
+static uint8_t mStartValue = 0;
+// 終了値までの差分
+static int mDiffValue = 0;
+// 指定CC
+static uint8_t mCC = 0;
+
+/*********************************************
+* 割り込みイベント
+**********************************************/
+
+
+/*********************************************
+* メソッド
+**********************************************/
+
+/*****************
+ * セッティング開始処理
+ */
+static auto setStatusStart = [&](MidiPacket packet){
+    // タイマー設定
+    // TODO: 多分ここで計算した方が楽なので、後で調整
+    mClockEnd = packet.getControlValue();
+    // チャンネル設定
+    mChannel = packet.getChannel();
+    // ステータス→セッティング開始
+    Midiglue::Debug::write_log("ST_SETTING_START", mStatus);
+    mStatus = ST_SETTING_START;
+
+};
+
+
+/*****************
+ * アイドル
+ */
+static auto stIdle = [&](MidiPacket packet) -> bool {
+    Midiglue::Debug::write_log("stIdle", mStatus);
+    if(packet.getControlNumber() == ${commandCc}){
+        // 設定開始
+        setStatusStart(packet);
+        return(true);
+    }
+    return(false);
+};
+
+/*****************
+ * セッティング-開始
+ */
+static auto stSettingStart = [&](MidiPacket packet) -> bool {
+
+    // リセット
+    if(packet.getControlNumber() == ${commandCc}){
+        Midiglue::Debug::write_log("reset", mStatus);
+        return(true);
+    }
+
+    if(mChannel == packet.getChannel()){
+        //このステータスで、設定チャンネルに最初に来たCCを記憶
+        mCC = packet.getControlNumber();
+        // CC valueの開始値
+        mStartValue = packet.getControlValue();
+        // ステータス→セッティング終了
+        Midiglue::Debug::write_log("ST_SETTING_END", mStatus);
+        mStatus = ST_SETTING_END;
+
+        return(true);
+    }
+
+    return(false);
+};
+
+/*****************
+ * セッティング-終了
+ */
+static auto stSettingEnd = [&](MidiPacket packet) -> bool {
+    // リセットが会った場合の処理
+    if(packet.getControlNumber() == ${commandCc}){
+        // 設定開始
+        setStatusStart(packet);
+        return(true);
+    }
+
+    // チャネルとCCの一致が必要
+    if(mChannel == packet.getChannel() && mCC == packet.getControlNumber()){
+        // CC valueの終了値
+        mDiffValue = packet.getControlValue() - mStartValue;
+        // クロックをリセット
+        mClock = 0;
+        // ステータス→スライダー開始
+        Midiglue::Debug::write_log("ST_SLIDER", mStatus);
+        mStatus = ST_SLIDER;
+
+        return(true);
+    }
+
+    return(false);
+};
+
+/*****************
+ * スライダー
+ */
+static auto stSlider = [&](MidiPacket packet) -> bool {
+    // リセットが会った場合の処理
+    if(packet.getControlNumber() == ${commandCc}){
+        // 設定開始
+        setStatusStart(packet);
+        return(true);
+    }
+
+    return(false);
+};
+
+
+/*****************
+ * Cc入力処理
+ */
+static auto inputCc = [&](MidiPacket packet){
+
+    // threwフラグ
+    bool threw = false;
+    switch(mStatus){
+    case ST_IDLE:           // アイドル
+        threw = stIdle(packet);
+        break;
+    case ST_SETTING_START:  // セッティング-開始
+        threw = stSettingStart(packet);
+        break;
+    case ST_SETTING_END:    // セッティング-終了
+        threw = stSettingEnd(packet);
+        break;
+    case ST_SLIDER:         // スライダー
+        threw = stSlider(packet);
+        break;
+    }
+
+    // threwしない場合は、入力をそのまま出力に送る
+    if(!threw){
+        out0 = packet;
+    }
+
+};
+
+/*****************
+ * クロック処理
+ */
+static auto inputClock = [&](){
+    // ステータスがSLIDERの場合のみ処理する
+    if(!mStatus == ST_SLIDER){
+        return;
+    }
+
+    // value設定
+    uint8_t value = mStartValue + (mDiffValue * mClock) / mClockEnd;
+    // CC送信
+    out0 = MidiPacket::makeControlChange((uint8_t)mChannel,(Midiglue::MIDICCType)mCC,(uint8_t)value);
+
+    // clock加算
+    mClock++;
+};
+
+
+
+
+/*********************************************
+* 実行処理
+**********************************************/
+
+
+if(@setup){
+    // 初期化
+    Midiglue::Debug::write_log("ST_IDLE", mStatus);
+    mStatus = ST_IDLE;   // ステータス
+
+}else if(@in0) {
+    // control change以外は処理なし
+    if(in0.isControlChange()){
+        inputCc(in0);
+    }else if(in0 == CLOCK) {
+        
+        inputClock();
+        // clockはそのままスルーもする
+        out0 = in0;
+    }else{
+        // どの処理にもひっかからない場合もスルー
+        out0 = in0;
+    }
+
+}

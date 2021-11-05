@@ -27,7 +27,12 @@ ${this}( &(Midiglue::__bang) , Midiglue::SETUP );
 <Code>
 
 
-/*****
+/****
+ * マクロ
+ *****/
+#define getMask(x) ( 0x80 >> x )
+
+/****
  * 定数
  *****/
 // 描画位置
@@ -87,7 +92,8 @@ static auto isEditMode = [&]() -> bool {
  * @param y     座標(y) → 0～1（相対位置で指定）
  */
 static auto getColor = [&](uint8_t x,uint8_t y) -> uint8_t {
-    uint8_t mask = 0x80 >> x;
+    uint8_t mask = getMask(x);
+    
 
     // 色指定（muteLock時は、赤色になる）    
     uint8_t onColor = LP3C_RED;
@@ -252,7 +258,7 @@ static auto pushPartArea = [&](uint8_t x,uint8_t y,uint8_t value){
     if(value > 0){
         if(!flagSoloLock) {     // ソロキーを押下していない。
             // ステータスを更新
-            pCurrentDisp[y] ^= 0x80 >> x;
+            pCurrentDisp[y] ^= getMask(x);
             // Launchpadの値を更新
             addDot(LP3B_NOMAL,x,y,getColor(x,y));
         } else {                // ソロキーを押下してる。
@@ -260,7 +266,7 @@ static auto pushPartArea = [&](uint8_t x,uint8_t y,uint8_t value){
             // 一回クリアして値をソロにする
             pCurrentDisp[0] = 0;
             pCurrentDisp[1] = 0;
-            pCurrentDisp[y] = 0x80 >> x;
+            pCurrentDisp[y] = getMask(x);
             // Launchpadの値を更新
             reDrow();
         }
