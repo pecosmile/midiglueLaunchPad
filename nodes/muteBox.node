@@ -81,6 +81,11 @@ static auto isEditMode = [&]() -> bool {
 };
 
 // [無名関数]指定位置のカラー番号を返す（yはMB_LOCからの相対位置で指定）
+/*****************
+ * 指定位置のカラー定数を返す
+ * @param x     座標(x) → 0～7
+ * @param y     座標(y) → 0～1（相対位置で指定）
+ */
 static auto getColor = [&](uint8_t x,uint8_t y) -> uint8_t {
     uint8_t mask = 0x80 >> x;
 
@@ -101,32 +106,52 @@ static auto getColor = [&](uint8_t x,uint8_t y) -> uint8_t {
 };
 
 
+/*****************
+ * LaunchPadへの送信バッファ追加
+ * @param mode  光り方のパタン（LP3B_NOMAL|LP3B_FLASH|LP3B_PULS）
+ * @param x     座標(x) → 0～8
+ * @param y     座標(y) → 0～1（相対位置で指定）
+ * @param color 色定数
+ */
+// SysExへ光点の追加
+static auto addDot = [&](uint8_t mode,uint8_t x,uint8_t y,uint8_t color){
+    Lp3::addDot(mpDispLp3,mode,x,MB_LOC + y,color);
+};
+
+
 
 /*****************
  * muteボタンの描画
  */
 static auto drowMuteButtun = [&](){
 
+    // デフォルトの色
     uint8_t mode  = LP3B_NOMAL;
     uint8_t color = CR_MUTE_UNLOCK;
+
+    // ミュートロック時の色
     if(flagMuteLock){
         mode  = LP3B_PULS;
         color = CR_MUTE_LOCK;
-
     }
 
-    Lp3::addDot(mpDispLp3,mode      ,8,MB_LOC    ,color);       // muteLockボタンの設定
-    Lp3::addDot(mpDispLp3,LP3B_NOMAL,8,MB_LOC + 1,CR_SOLO);     // mute/solo ボタン
+    // 描画
+    addDot(mode      ,8,0,color);       // muteLockボタンの設定
+    addDot(LP3B_NOMAL,8,1,CR_SOLO);     // mute/solo ボタン
 };
 
 /*****************
  * 表示のreDrow
  */
 static auto reDrow = [&](){
+
+    //part 1～16を１つずつ設定する
     for(int i=0;i<16;i++) {
+        // part → 座標に変換
         uint8_t y = i/LP3_maxXY;
         uint8_t x = i%LP3_maxXY;
-        Lp3::addDot(mpDispLp3,0,x,MB_LOC + y,getColor(x,y));
+        // 変換した座標に対応する色を設定
+        addDot(LP3B_NOMAL,x,y,getColor(x,y));
     }
     drowMuteButtun();
 };
@@ -139,7 +164,7 @@ static auto initDrow = [&](){
 };
 
 /*****************
- * muteXXXへのミュート情報の送信
+ * muteXXXへのミｋュート情報の送信
  * @param status ステータス
  */
 static auto sendMuteXXX = [&](uint8_t status){
@@ -192,6 +217,7 @@ static auto inputMuteXXX = [&](IntList buff){
         muteGBox[0] = buff->at(0);
         muteGBox[1] = buff->at(1);
         reDrow();
+        // TODO:ここで、変化分を送信させればOK
     }
 };
 
@@ -214,84 +240,126 @@ static auto freeMuteLock = [&](){
 
 
 /*****************
+ * LaunchPad-muteボタンを押した時の処理
+ * @param x 押されたボタンのX軸(0～8)
+ * @param y 押されたボタンのy軸(0～1)
+ * @param value value値
+ */
+static auto pushPartArea = [&](uint8_t x,uint8_t y,uint8_t value){
+    // muteButtonを押した
+    // ミュートロック中の操作なのでミュート解除は無効
+    flagUnMute = false;
+    if(value > 0){
+        if(!flagSoloLock) {     // ソロキーを押下していない。
+            // ステータスを更新
+            pCurrentDisp[y] ^= 0x80 >> x;
+            // Launchpadの値を更新
+            addDot(LP3B_NOMAL,x,y,getColor(x,y));
+        } else {                // ソロキーを押下してる。
+            flagSoloLock = false;
+            // 一回クリアして値をソロにする
+            pCurrentDisp[0] = 0;
+            pCurrentDisp[1] = 0;
+            pCurrentDisp[y] = 0x80 >> x;
+            // Launchpadの値を更新
+            reDrow();
+        }
+        // 操作情報をpatternBox or grooveBoxに送信
+        sendMuteOperationData(0);// 変更分のみ送信
+    }
+};
+
+/*****************
+ * Mute/Soloボタン（９列目）処理
+ * @param y 押されたボタンのy軸(0～1)
+ * @param value value値
+ */
+static auto pushMuteSolo = [&](uint8_t y,uint8_t value){
+    // 9列目のボタンはmutelock mute/solo ボタン
+
+    if(y==0) { 
+    // -----------------
+    // muteLockボタン処理
+    // -----------------
+        if(value > 0){
+            if(!flagMuteLock){
+                // muteLock ON
+                flagMuteLock = true;
+                drowMuteButtun();
+            }
+            else
+            {
+                freeMuteLock();
+            }
+        }
+    } else if(y==1) {
+    // -----------------
+    // mute/soloボタン処理
+    // -----------------
+        if(value > 0){ // 押したとき
+            // 押したタイミングでmuteLockは解除
+            flagMuteLock = false;
+            drowMuteButtun();
+            // solo処理に対してのフラグ設定
+            flagSoloLock = true;
+            flagUnMute = true;
+        } else { // 離したとき
+            flagSoloLock = false;
+            // ミュートロック時にミュート操作をしていない場合は
+            // 全ミュートを解除する
+            if(flagUnMute) {
+                pCurrentDisp[0] = 0xff;
+                pCurrentDisp[1] = 0xff;
+                flagUnMute = false;
+                // launchpad リフレッシュ
+                reDrow();
+
+                // 操作情報をpatternBox or grooveBoxに送信
+                sendMuteOperationData(LP3_MB_REFRESH_MUTE);
+            }
+        }
+    }
+};
+
+/*****************
  * LaunchPadからの入力処理
  * @param x 押されたボタンのX軸(0～8)
  * @param y 押されたボタンのy軸(0～1)
  * @param value value値
  */
-static auto inputLaunchPad = [&](uint8_t x,uint8_t y,uint8_t value){
+static auto inputLaunchPad2 = [&](uint8_t x,uint8_t y,uint8_t value){
     if(x<LP3_maxXY) {
-        // ミュートロック中の操作なのでミュート解除は無効
-        flagUnMute = false;
-        if(value > 0){
-
-            if(!flagSoloLock) {     // ソロキーを押下していない。
-                // ステータスを更新
-                pCurrentDisp[y] ^= 0x80 >> x;
-                // Launchpadの値を更新
-                Lp3::addDot(mpDispLp3,0,x,MB_LOC + y,getColor(x,y));
-
-            } else {                // ソロキーを押下してる。
-                flagSoloLock = false;
-                // 一回クリアして値をソロにする
-                pCurrentDisp[0] = 0;
-                pCurrentDisp[1] = 0;
-                pCurrentDisp[y] = 0x80 >> x;
-                // Launchpadの値を更新
-                reDrow();
-            }
-
-            // 操作情報をpatternBox or grooveBoxに送信
-            sendMuteOperationData(0);// 変更分のみ送信
-        }
+        // part areaを押した
+        pushPartArea(x,y,value);
     }
     else {
-        // 9列目のボタンはmutelock mute/solo ボタン
-
-        if(y==0) { 
-        // -----------------
-        // muteLockボタン処理
-        // -----------------
-            if(value > 0){
-                if(!flagMuteLock){
-                    // muteLock ON
-                    flagMuteLock = true;
-                    drowMuteButtun();
-                }
-                else
-                {
-                    freeMuteLock();
-                }
-            }
-        } else if(y==1) {
-        // -----------------
-        // mute/soloボタン処理
-        // -----------------
-            if(value > 0){ // 押したとき
-                // 押したタイミングでmuteLockは解除
-                flagMuteLock = false;
-                drowMuteButtun();
-                // solo処理に対してのフラグ設定
-                flagSoloLock = true;
-                flagUnMute = true;
-            } else { // 離したとき
-                flagSoloLock = false;
-                // ミュートロック時にミュート操作をしていない場合は
-                // 全ミュートを解除する
-                if(flagUnMute) {
-                    pCurrentDisp[0] = 0xff;
-                    pCurrentDisp[1] = 0xff;
-                    flagUnMute = false;
-                    // launchpad リフレッシュ
-                    reDrow();
-
-                    // 操作情報をpatternBox or grooveBoxに送信
-                    sendMuteOperationData(LP3_MB_REFRESH_MUTE);
-                }
-            }
-        }
+        // mute/soloボタンを押した
+        pushMuteSolo(y,value);
+        
     }
 };
+
+/*****************
+ * LaunchPadからの入力処理
+ * @param packet パケット
+ */
+static auto inputLaunchPad = [&](MidiPacket packet){
+    // note:launchpadのボタンを押したタイミングでcontrol value = 127、
+    // 離したタイミングで value = 0が送られる。
+
+    // 押された場所の取得
+    static uint8_t x;
+    static uint8_t y;
+    Lp3::getLocation(packet,&x,&y);
+    // muteBox外の入力は処理しない。
+    if(y>=MB_LOC && y<MB_LOC+2) {
+        y-=MB_LOC; // y軸補正
+        inputLaunchPad2(x,y,packet.getControlValue());
+    }
+
+};
+
+
 
 /*****************
  * patternBox からの入力
@@ -371,18 +439,7 @@ else if (@in1){
     inputMuteXXX(in1);
 } else if (@in2) {
     // ■ LaunchPadからの入力
-    // note:launchpadのボタンを押したタイミングでcontrol value = 127、
-    // 離したタイミングで value = 0が送られる。
-
-    // 押された場所の取得
-    static uint8_t x;
-    static uint8_t y;
-    Lp3::getLocation(in2,&x,&y);
-    // muteBox外の入力は処理しない。
-    if(y>=MB_LOC && y<MB_LOC+2) {
-        y-=MB_LOC; // y軸補正
-        inputLaunchPad(x,y,in2.getControlValue());
-    }
+    inputLaunchPad(in2);
 
 } else if (@in3) {
     // ■ patternBoxからの入力

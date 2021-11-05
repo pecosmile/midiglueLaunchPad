@@ -189,6 +189,7 @@ static auto inputExtendMutePacket = [&](MidiPacket packet){
     updateMuteMap(muteData,cc,value);
 
     // mute送信
+    // TODO:たぶんこれを送らなくてもなんとかなるはず
     extendMute(false,muteData);
 
     // LaunchPadへの送信
