@@ -1,6 +1,7 @@
 <Comment>
 muteBox
 GroobeBoxにミュート状態の表示をします。
+(再作成)
 
 kokou ni-sui@sabaco
 
@@ -8,11 +9,9 @@ kokou ni-sui@sabaco
 input Int : LaunchPad制御（0=Disable）
 input IntList : ミュート処理情報(muteXXX)
 input MidiPacket : ボタン入力情報(LaunchPad) 
-input IntList : パターン処理情報(patternBox)
 input Int : muteLock解除bung(1を受けるとmuteLock解除)
 output IntList : ミュート処理情報(muteXXX)
 output IntList : 描画情報(lpControl)
-output IntList : パターン処理情報(patternBox)
 
 <Description>
 TODO:後で書く
@@ -26,91 +25,150 @@ ${this}( &(Midiglue::__bang) , Midiglue::SETUP );
 
 <Code>
 
-
-/****
+/**********************
  * マクロ
- *****/
+ **********************/
 #define getMask(x) ( 0x80 >> x )
 
-/****
+/**********************
  * 定数
- *****/
+ **********************/
 // 描画位置
 static const uint8_t MB_LOC = ${locate};
 
 // muteButtun
-static uint8_t CR_MUTE_LOCK = LP3C_D_RED;
-static uint8_t CR_MUTE_UNLOCK = LP3C_LGY_BLUE;
-static uint8_t CR_SOLO = LP3C_L_ORANGE;
+static const uint8_t CR_MUTE_LOCK = LP3C_D_RED;
+static const uint8_t CR_MUTE_UNLOCK = LP3C_LGY_BLUE;
+static const uint8_t CR_SOLO = LP3C_L_ORANGE;
 
+// ステータス
+static const uint8_t ST_MUTE = 1;
+static const uint8_t ST_SOLO = 2;
+static const uint8_t ST_MUTELOCK = 3;
+static const uint8_t ST_FILTERSETTING = 4;
 
-/*****
+/**********************
  * 変数
- *****/
+ **********************/
 // 色情報
 static uint8_t colorInfo[16] = { LP3C_ORANGE };
 
 // GBMute(grooveBoxのmute情報)
-static uint8_t muteGBox[2];
-// 編集中mute
-static uint8_t muteEdit[2];
-// 表示カレント（操作中のMute）
-static uint8_t* pCurrentDisp = muteGBox;
+static uint8_t mMuteStatus[2];
+
+// MuteLock情報
+static uint8_t mMuteLock[2];
+
+// filter情報
+static uint8_t mFilter[2];
 
 
 // 出力(Launch Pad)
 static IntList mpDispLp3 = Midiglue::init_default<IntList>();
 // 出力(GrooveBox)
 static IntList pMuteXXX = Midiglue::init_default<IntList>();
-// 出力(patternBox)
-static IntList pPtnBox = Midiglue::init_default<IntList>();
-// ミュートロック
-static bool flagMuteLock = false;
-// ソロロック
-static bool flagSoloLock = false;
-// ミュート解除フラグ
-static bool flagUnMute = false;
-
 // LaunchPad入出力許可フラグ
 static bool lpEnable = true;
 
+// ステータス
+static uint8_t mStatus = ST_MUTE;
 
 
+/**********************
+ * メソッド
+ **********************/
 
 /*****************
- * 編集モードチェック（表示カレントが編集中muteに向いている状態）
+ * muteXXXへのミュート情報の送信
  * @param status ステータス
  */
-static auto isEditMode = [&]() -> bool {
-    return(pCurrentDisp == muteEdit);
+static auto sendMuteXXX = [&](uint8_t status){
+    pMuteXXX->clear();
+    pMuteXXX->push_back(mMuteStatus[0] & mFilter[0]);
+    pMuteXXX->push_back(mMuteStatus[1] & mFilter[1]);
+    pMuteXXX->push_back(status);
+    out0 = pMuteXXX;
 };
 
-// [無名関数]指定位置のカラー番号を返す（yはMB_LOCからの相対位置で指定）
+/***********************************************************************
+ * launchPadバッファ操作
+ ***********************************************************************/
+/*****************
+ * 指定位置のカラー定数を返す(mute mode)
+ * @param x     座標(x) → 0～7
+ * @param y     座標(y) → 0～1（相対位置で指定）
+ */
+static auto getColorMuteMode = [&](uint8_t x,uint8_t y) -> uint8_t {
+    uint8_t mask = getMask(x);
+
+    // 色指定（mute lock時の色をデフォルトにする）
+    uint8_t onColor = LP3C_D_RED;   // onの色
+    uint8_t offColor = LP3C_RED;    // offの色
+
+    if(0 == (mFilter[y] & mask)){
+        // Filterでoffになっている所は青色でオミットする。
+        onColor = LP3C_G_BLUE;
+        offColor = LP3C_D_BLUE;
+    }else if(0 == (mMuteLock[y] & mask)){
+        // muteLockされていない場所の場合は設定した色を返す
+        onColor = colorInfo[y*LP3_maxXY + x];
+        offColor = LP3C_DK_GLAY;
+    }
+
+    // ステータスにより色を変更
+    return(0<(mMuteStatus[y] & mask) ? onColor : offColor);
+};
+
+/*****************
+ * 指定位置のカラー定数を返す(FilterSetting)
+ * @param x     座標(x) → 0～7
+ * @param y     座標(y) → 0～1（相対位置で指定）
+ */
+static auto getColorFilterSetting = [&](uint8_t x,uint8_t y) -> uint8_t {
+    return(0<(mFilter[y] & getMask(x)) ? LP3C_BLUE : LP3C_D_BLUE);
+};
+
 /*****************
  * 指定位置のカラー定数を返す
  * @param x     座標(x) → 0～7
  * @param y     座標(y) → 0～1（相対位置で指定）
  */
 static auto getColor = [&](uint8_t x,uint8_t y) -> uint8_t {
-    uint8_t mask = getMask(x);
-    
 
-    // 色指定（muteLock時は、赤色になる）    
-    uint8_t onColor = LP3C_RED;
-    uint8_t offColor = LP3C_D_RED;
-    if(!flagMuteLock){
-        onColor = colorInfo[y*LP3_maxXY + x];
-        offColor = LP3C_DK_GLAY;
+    uint8_t color = LP3C_BLACK;
+
+    if(mStatus != ST_FILTERSETTING){
+        color = getColorMuteMode(x,y);
+    } else {
+        color = getColorFilterSetting(x,y);
     }
-
-    // ステータスにより色を変更
-    if(0<(pCurrentDisp[y] & mask)) {
-        return(onColor);
-    }
-    return(offColor);
-
+    return(color);
 };
 
+// /*****************
+//  * 指定位置のカラー定数を返す(古いメソッド)
+//  * @param x     座標(x) → 0～7
+//  * @param y     座標(y) → 0～1（相対位置で指定）
+//  */
+// static auto getColor = [&](uint8_t x,uint8_t y) -> uint8_t {
+//     uint8_t mask = getMask(x);
+    
+
+//     // 色指定（muteLock時は、赤色になる）    
+//     uint8_t onColor = LP3C_RED;
+//     uint8_t offColor = LP3C_D_RED;
+//     if(mStatus != ST_MUTELOCK){
+//         onColor = colorInfo[y*LP3_maxXY + x];
+//         offColor = LP3C_DK_GLAY;
+//     }
+
+//     // ステータスにより色を変更
+//     if(0<(mMuteStatus[y] & mask)) {
+//         return(onColor);
+//     }
+//     return(offColor);
+
+// };
 
 /*****************
  * LaunchPadへの送信バッファ追加
@@ -124,8 +182,6 @@ static auto addDot = [&](uint8_t mode,uint8_t x,uint8_t y,uint8_t color){
     Lp3::addDot(mpDispLp3,mode,x,MB_LOC + y,color);
 };
 
-
-
 /*****************
  * muteボタンの描画
  */
@@ -136,7 +192,7 @@ static auto drowMuteButtun = [&](){
     uint8_t color = CR_MUTE_UNLOCK;
 
     // ミュートロック時の色
-    if(flagMuteLock){
+    if(mStatus == ST_MUTELOCK){
         mode  = LP3B_PULS;
         color = CR_MUTE_LOCK;
     }
@@ -162,48 +218,59 @@ static auto reDrow = [&](){
     drowMuteButtun();
 };
 
- // 初期化
+/***********************************************************************
+ * 共通処理
+ ***********************************************************************/
+/*****************
+ * mute状態の反転
+ * @param x 押されたボタンのX軸(0～7)
+ * @param y 押されたボタンのy軸(0～1)
+ */
+static auto tarnMute = [&](uint8_t* pMuteBuff,uint8_t x,uint8_t y){
+    // ステータスを更新
+    pMuteBuff[y] ^= getMask(x);
+    // Launchpadの値を更新
+    addDot(LP3B_NOMAL,x,y,getColor(x,y));
+
+};
+
+/***********************************************************************
+* 初期化処理
+ ***********************************************************************/
 static auto initDrow = [&](){
+    // Launchpadバッファのクリア
     mpDispLp3->clear();
+    // LaunchPadへの送信バッファ設定
     reDrow();
+    // 自動送信されないのでLaunchPadへの送信を行う
     out1 = mpDispLp3;
 };
 
-/*****************
- * muteXXXへのミｋュート情報の送信
- * @param status ステータス
+/**********************************************
+ * mute lockボタン押下のタイマーアウト
  */
-static auto sendMuteXXX = [&](uint8_t status){
-    // ミュートロック時は送信しないよ
-    if(!flagMuteLock){
-        pMuteXXX->clear();
-        pMuteXXX->push_back(muteGBox[0]);
-        pMuteXXX->push_back(muteGBox[1]);
-        pMuteXXX->push_back(status);
-        out0 = pMuteXXX;
-    }
+static auto onTimerFilter = [&](){
+    mStatus = ST_FILTERSETTING;
+    // LaunchPadへの送信バッファ設定
+    reDrow();
+    // 自動送信されないのでLaunchPadへの送信を行う
+    out1 = mpDispLp3;
+
 };
 
-/*****************
- * 操作ミュート情報の送信
- * @param status ステータス
- */
-static auto sendMuteOperationData = [&](uint8_t status){
-    // 編集モードでないなら状態をgrooveBoxに送信
-    if(!isEditMode()) {
-        sendMuteXXX(status);
-    } else {
-        // muteEditの内容をpatternBoxに送信
-        pPtnBox->clear();
-        pPtnBox->push_back(muteEdit[0]);
-        pPtnBox->push_back(muteEdit[1]);
-        out2 = pPtnBox;
-    }
-};
+/*********************************************
+* 割り込みイベント
+**********************************************/
+// LaunchPadの初期表示
+static auto initEvent = Midiglue::make_oneshot_us_event<>(initDrow);
+// LaunchPadの初期表示
+static auto timerFilterMode = Midiglue::make_oneshot_us_event<>(onTimerFilter);
 
 
-
-/*****************
+/***********************************************************************
+ * MuteXXX からの入力
+ ***********************************************************************/
+/**********************************************
  * MuteXXX からの入力
  * @param buff 入力
  */
@@ -211,124 +278,161 @@ static auto inputMuteXXX = [&](IntList buff){
     // バッファサイズが16の場合、色の初期化情報とする。
     if(16 == buff->size() ) {
         // フラグの初期化
-        muteGBox[0] = 0xff;
-        muteGBox[1] = 0xff;
+        mMuteStatus[0] = 0xff;
+        mMuteStatus[1] = 0xff;
         // 色の初期化
         for(int i=0;i<16;i++) {
             colorInfo[i] = buff->at(i);
         }
     }
     else if(2 == buff->size()) { // バッファサイズが2の場合、mute処理
+
+        // 処理不要
+        if(mMuteStatus[0] == buff->at(0) && mMuteStatus[1] == buff->at(1)){
+            return;
+        }
+
         // ミュートステータス設定
-        muteGBox[0] = buff->at(0);
-        muteGBox[1] = buff->at(1);
+        mMuteStatus[0] = buff->at(0);
+        mMuteStatus[1] = buff->at(1);
+        // 描画前にフィルタを介したデータをmuteXXXに送信する
+        sendMuteXXX(0);
+        // launchpadへの描画
+        Midiglue::Debug::write_log("reDrow A", 0);
         reDrow();
-        // TODO:ここで、変化分を送信させればOK
     }
 };
 
+
+
+/***********************************************************************
+ * LaunchPadからの入力
+ ***********************************************************************/
 /*****************
- * muteLock解除処理
- */
-static auto freeMuteLock = [&](){
-    // 特にロックされていない場合は処理しない
-    if(flagMuteLock == false){
-        return;
-    }
-
-    // muteLock 解除
-    flagMuteLock = false;
-    // launchpad リフレッシュ
-    reDrow();
-    // 操作情報をpatternBox or grooveBoxに送信
-    sendMuteOperationData(LP3_MB_REFRESH_MUTE);
-};
-
-
-/*****************
- * LaunchPad-muteボタンを押した時の処理
- * @param x 押されたボタンのX軸(0～8)
+ * partボタンを押した時の処理(0～7列目)
+ * @param x 押されたボタンのX軸(0～7)
  * @param y 押されたボタンのy軸(0～1)
- * @param value value値
  */
-static auto pushPartArea = [&](uint8_t x,uint8_t y,uint8_t value){
-    // muteButtonを押した
-    // ミュートロック中の操作なのでミュート解除は無効
-    flagUnMute = false;
-    if(value > 0){
-        if(!flagSoloLock) {     // ソロキーを押下していない。
-            // ステータスを更新
-            pCurrentDisp[y] ^= getMask(x);
-            // Launchpadの値を更新
-            addDot(LP3B_NOMAL,x,y,getColor(x,y));
-        } else {                // ソロキーを押下してる。
-            flagSoloLock = false;
-            // 一回クリアして値をソロにする
-            pCurrentDisp[0] = 0;
-            pCurrentDisp[1] = 0;
-            pCurrentDisp[y] = getMask(x);
-            // Launchpadの値を更新
-            reDrow();
-        }
-        // 操作情報をpatternBox or grooveBoxに送信
-        sendMuteOperationData(0);// 変更分のみ送信
+static auto pushPartArea = [&](uint8_t x,uint8_t y){
+    switch(mStatus){
+    case ST_MUTE:
+        // ミュート情報の変更
+        tarnMute(mMuteStatus,x,y);
+        // mute処理送信
+        sendMuteXXX(0);
+    break;
+    case ST_SOLO:
+        // mute情報をクリアして値をソロにする
+        mMuteStatus[0] = 0;
+        mMuteStatus[1] = 0;
+        mMuteStatus[y] = getMask(x);
+        // Launchpadの値を更新
+        reDrow();
+        // mute処理送信
+        sendMuteXXX(0);
+        // ステータスをmuteに変更
+        mStatus = ST_MUTE;
+    break;
+    case ST_MUTELOCK:
+        // タイマキャンセル
+        timerFilterMode->cancel();
+        // ミュートロック処理
+        tarnMute(mMuteLock,x,y);
+    break;
+    case ST_FILTERSETTING:
+        // フィルタ処理
+        tarnMute(mFilter,x,y);
+
+    break;
     }
 };
 
 /*****************
- * Mute/Soloボタン（９列目）処理
- * @param y 押されたボタンのy軸(0～1)
- * @param value value値
+ * MuteLockを押した
  */
-static auto pushMuteSolo = [&](uint8_t y,uint8_t value){
-    // 9列目のボタンはmutelock mute/solo ボタン
-
-    if(y==0) { 
-    // -----------------
-    // muteLockボタン処理
-    // -----------------
-        if(value > 0){
-            if(!flagMuteLock){
-                // muteLock ON
-                flagMuteLock = true;
-                drowMuteButtun();
-            }
-            else
-            {
-                freeMuteLock();
-            }
-        }
-    } else if(y==1) {
-    // -----------------
-    // mute/soloボタン処理
-    // -----------------
-        if(value > 0){ // 押したとき
-            // 押したタイミングでmuteLockは解除
-            flagMuteLock = false;
-            drowMuteButtun();
-            // solo処理に対してのフラグ設定
-            flagSoloLock = true;
-            flagUnMute = true;
-        } else { // 離したとき
-            flagSoloLock = false;
-            // ミュートロック時にミュート操作をしていない場合は
-            // 全ミュートを解除する
-            if(flagUnMute) {
-                pCurrentDisp[0] = 0xff;
-                pCurrentDisp[1] = 0xff;
-                flagUnMute = false;
-                // launchpad リフレッシュ
-                reDrow();
-
-                // 操作情報をpatternBox or grooveBoxに送信
-                sendMuteOperationData(LP3_MB_REFRESH_MUTE);
-            }
-        }
+static auto pushMuteLock = [&](){
+    switch(mStatus){
+    case ST_MUTE:
+        // タイマ設定（3秒）
+        timerFilterMode->schedule(3000 * 1000);
+        // ステータスをmute lockに変更
+        mStatus = ST_MUTELOCK;
+    break;
+    case ST_SOLO:
+    break;
+    case ST_MUTELOCK:
+    break;
+    case ST_FILTERSETTING:
+        // ステータスをmute modeに変更
+        mStatus = ST_MUTE;
+        // LaunchPadへの送信バッファ設定
+        reDrow();
+    break;
+    }
+};
+/*****************
+ * MuteLockを離した
+ */
+static auto releaseMuteLock = [&](){
+    switch(mStatus){
+    case ST_MUTE:
+    break;
+    case ST_SOLO:
+    break;
+    case ST_MUTELOCK:
+        // タイマキャンセル
+        timerFilterMode->cancel();
+        // ステータスをmute modeに変更
+        mStatus = ST_MUTE;
+    break;
+    case ST_FILTERSETTING:
+    break;
+    }
+};
+/*****************
+ * Soloを押した
+ */
+static auto pushSolo = [&](){
+    switch(mStatus){
+    case ST_MUTE:
+        mStatus = ST_SOLO;
+    break;
+    case ST_SOLO:
+    break;
+    case ST_MUTELOCK:
+    break;
+    case ST_FILTERSETTING:
+    break;
+    }
+};
+/*****************
+ * Soloを離した
+ */
+static auto releaseSolo = [&](){
+    switch(mStatus){
+    case ST_MUTE:
+    break;
+    case ST_SOLO:
+        // 全てのパートをONにする
+        mMuteStatus[0] = 0xff;
+        mMuteStatus[1] = 0xff;
+        // launchpad リフレッシュ
+        reDrow();
+        // grooveBoxに送信
+        sendMuteXXX(LP3_MB_REFRESH_MUTE);
+        // ステータスをmuteに変更
+        mStatus = ST_MUTE;
+    break;
+    case ST_MUTELOCK:
+    break;
+    case ST_FILTERSETTING:
+    break;
     }
 };
 
+
 /*****************
- * LaunchPadからの入力処理
+ * LaunchPadからの入力処理２
  * @param x 押されたボタンのX軸(0～8)
  * @param y 押されたボタンのy軸(0～1)
  * @param value value値
@@ -336,12 +440,18 @@ static auto pushMuteSolo = [&](uint8_t y,uint8_t value){
 static auto inputLaunchPad2 = [&](uint8_t x,uint8_t y,uint8_t value){
     if(x<LP3_maxXY) {
         // part areaを押した
-        pushPartArea(x,y,value);
+        if(value > 0){
+            pushPartArea(x,y);
+        }
     }
     else {
-        // mute/soloボタンを押した
-        pushMuteSolo(y,value);
-        
+        if(y==0){
+            if(value > 0){  pushMuteLock();     }
+            else{           releaseMuteLock();  }
+        }else{
+            if(value > 0){  pushSolo();         }
+            else{           releaseSolo();      }
+        }     
     }
 };
 
@@ -362,75 +472,51 @@ static auto inputLaunchPad = [&](MidiPacket packet){
         y-=MB_LOC; // y軸補正
         inputLaunchPad2(x,y,packet.getControlValue());
     }
-
 };
 
 
-
+/***********************************************************************
+ * end 8 bar完了
+ ***********************************************************************/
 /*****************
- * patternBox からの入力
- * @param buff 入力
+ * muteLock解除処理
  */
-static auto inputPatternBox = [&](IntList buff){
-    // ステータス取得
-    uint8_t status = buff->at(2) & LP3_MB_MODE;
+static auto freeMuteLock = [&](){
 
-    switch(status){
+    // mute Lock指定が無ければ何もしない
+    if(mMuteStatus[0] == 0 && mMuteStatus[1] == 0)
+    { return;   }
 
-    // ①再生モード
-    case LP3_MB_MODE_PLAY:
-
-        // GBMuteへの設定
-        muteGBox[0] = buff->at(0);
-        muteGBox[1] = buff->at(1);
-        // patternBoxからの受信はそのままmuteXXXに送信
-        sendMuteXXX(LP3_MB_REFRESH_MUTE);
-        // 表示カレントが「groubeBoxのmute情報」であれば、ディスプレイ表示
-        if(!isEditMode()) {
-            reDrow();
-        }
-    break;
-
-    // ②編集モード（開始）
-    case LP3_MB_MODE_EDIT_ST:
-
-        // 表示カレントを「編集中mute」に変更
-        pCurrentDisp = muteEdit;
-        // 取得した値を「編集中mute」に設定
-        muteEdit[0] = buff->at(0);
-        muteEdit[1] = buff->at(1);
-        // ディスプレイ表示
-        reDrow();
-    break;
-
-    // ③編集モード（終了）
-    case LP3_MB_MODE_EDIT_ED:
-        // 表示カレントを「GBMute」に変更
-        pCurrentDisp = muteGBox;
-        // ディスプレイ表示
-        reDrow();
-    break;
-
-    }
+    // mute lockの情報をmuteに反映させる。
+    // mute lockの値をXORで反転
+    mMuteStatus[0] ^= mMuteLock[0];
+    mMuteStatus[1] ^= mMuteLock[1];
+    // mute lockをクリア
+    mMuteLock[0] = 0;
+    mMuteLock[1] = 0;
+    // 操作情報をpatternBoxに送信
+    sendMuteXXX(0);
+    // launchpad リフレッシュ
+    reDrow();
 };
 
-/*********************************************
-* 割り込みイベント
-**********************************************/
-// LaunchPadの初期表示
-static auto initEvent = Midiglue::make_oneshot_us_event<>(initDrow);
 
-
-/*********************************************
+/***********************************************************************
 * 実行処理
-**********************************************/
-
+************************************************************************/
 mpDispLp3->clear();
 
 // セットアップ
 if (@setup){
     // 3秒後に初期表示処理を呼び出す
     initEvent->schedule(3000 * 1000);
+    //
+    mMuteLock[0] = 0x00;
+    mMuteLock[1] = 0x00;
+
+    mFilter[0] = 0xFF;
+    mFilter[1] = 0xFF;
+
 }
 else if (@in0){ // Enable
     if (in0 == 0) {
@@ -448,11 +534,8 @@ else if (@in1){
     inputLaunchPad(in2);
 
 } else if (@in3) {
-    // ■ patternBoxからの入力
-    inputPatternBox(in3);
-} else if (@in4) {
     // ■ free muteLock
-    if(in4 == 1){
+    if(in3 == 1){
         freeMuteLock();
     }
 }
@@ -461,5 +544,3 @@ else if (@in1){
 if(0<mpDispLp3->size()){
     out1 = mpDispLp3;
 }
-
-

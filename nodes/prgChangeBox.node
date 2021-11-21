@@ -233,7 +233,7 @@ static auto inputProgramChange = [&](uint8_t x,uint8_t y,uint8_t value){
     // 入力不要
     if(!lpEnable) { return; }
 
-    Midiglue::Debug::write_log("1", x*10+y);
+    // Midiglue::Debug::write_log("inputProgramChange", x*10+y);
 
     // boxの範囲内であることを確認(縦)
     if(y < LOCATE_Y || y >= (LOCATE_Y + BOXSIZE_Y)){

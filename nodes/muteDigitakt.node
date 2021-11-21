@@ -120,6 +120,7 @@ static auto extendMute = [&](bool flgRefresh,uint8_t* muteData){
                 uint8_t channel =  channelTbl.at(i);           // チャンネル
                 uint8_t dat = (0<(mask & muteData[y])) ? 0:127;  // on(0)/off(127)
                 out0 = MidiPacket::makeControlChange(channel,DTKCC_Mute,dat);
+                // Midiglue::Debug::write_log("send CC", channel);
             }
 
             mask = mask >> 1;
@@ -164,8 +165,6 @@ static auto updateMuteMap = [&](uint8_t* target,uint8_t cc,uint8_t value){
  * ※呼び出す前に、チャンネルのチェックは済ませて下さい。
  */
 static auto inputExtendMutePacket = [&](MidiPacket packet){
-    Midiglue::Debug::write_log("inputExtendMutePacket", packet.getControlNumber());
-
     uint8_t value = packet.getControlValue();
     uint8_t cc = packet.getControlNumber();
 
@@ -179,6 +178,8 @@ static auto inputExtendMutePacket = [&](MidiPacket packet){
         return;
     }
 
+    // Midiglue::Debug::write_log("inputExtendMutePacket", packet.getControlNumber());
+
     // mute data
     // このデータを変更して、muteを送る。
     uint8_t muteData[2];
@@ -189,13 +190,13 @@ static auto inputExtendMutePacket = [&](MidiPacket packet){
     updateMuteMap(muteData,cc,value);
 
     // mute送信
-    // TODO:たぶんこれを送らなくてもなんとかなるはず
-    extendMute(false,muteData);
+    // // TODO:たぶんこれを送らなくてもなんとかなるはず
+    // extendMute(false,muteData);
 
     // LaunchPadへの送信
     pOutList->clear();
-    pOutList->push_back(muteStatus[0]);
-    pOutList->push_back(muteStatus[1]);
+    pOutList->push_back(muteData[0]);
+    pOutList->push_back(muteData[1]);
 
     out1 = pOutList;
 
