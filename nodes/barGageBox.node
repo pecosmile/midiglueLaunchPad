@@ -69,7 +69,28 @@ static bool lpEnable = true;
  * 関数
 **********************************************/
 
-// 再描画
+/***********************************************************************
+ * 共通処理
+ ***********************************************************************/
+
+/*****************
+ * Launch pad への送信
+ * @param data  出力したい描画情報
+ * @param y 押されたボタンのy軸(0～1)
+ */
+static auto outLaunchPad = [&](){
+    if(lpEnable)
+    {
+        // 出力
+        out0 = mpDispLp3;
+    }
+};
+
+
+
+/***********************************************************************
+* 再描画
+ ***********************************************************************/
 static auto reDrow = [&](){
     for(int x=0;x<LP3_maxXY;x++){
         uint8_t color = COLOR_BACK;
@@ -85,11 +106,16 @@ static auto reDrow = [&](){
 
 };
 
-// 初期化
+/***********************************************************************
+* 初期化処理
+ ***********************************************************************/
 static auto initDrow = [&](){
+    // Launchpadバッファのクリア
     mpDispLp3->clear();
+    // LaunchPadへの送信バッファ設定
     reDrow();
-    out0 = mpDispLp3;
+    // 自動送信されないのでLaunchPadへの送信を行う
+    outLaunchPad();
 };
 
 
@@ -118,7 +144,11 @@ static auto pushButtun = [&](uint8_t x,uint8_t y,uint8_t value){
 
 // 入力：LaunchPad
 static auto inputLaunchPad = [&](MidiPacket packet){
-    // LaunchPadからの入力
+
+    // LaunchPad制御制限されている場合は無視。
+    if(!lpEnable)
+    {   return; }
+
     // 押された場所の取得
     static uint8_t x;
     static uint8_t y;
@@ -204,5 +234,5 @@ else if (@in2) { // LaunchPadからの入力
 
 // バッファがあればlaunchpadに送信
 if(0<mpDispLp3->size()){
-    out0 = mpDispLp3;
+    outLaunchPad();
 }

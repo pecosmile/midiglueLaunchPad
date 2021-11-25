@@ -145,31 +145,6 @@ static auto getColor = [&](uint8_t x,uint8_t y) -> uint8_t {
     return(color);
 };
 
-// /*****************
-//  * 指定位置のカラー定数を返す(古いメソッド)
-//  * @param x     座標(x) → 0～7
-//  * @param y     座標(y) → 0～1（相対位置で指定）
-//  */
-// static auto getColor = [&](uint8_t x,uint8_t y) -> uint8_t {
-//     uint8_t mask = getMask(x);
-    
-
-//     // 色指定（muteLock時は、赤色になる）    
-//     uint8_t onColor = LP3C_RED;
-//     uint8_t offColor = LP3C_D_RED;
-//     if(mStatus != ST_MUTELOCK){
-//         onColor = colorInfo[y*LP3_maxXY + x];
-//         offColor = LP3C_DK_GLAY;
-//     }
-
-//     // ステータスにより色を変更
-//     if(0<(mMuteStatus[y] & mask)) {
-//         return(onColor);
-//     }
-//     return(offColor);
-
-// };
-
 /*****************
  * LaunchPadへの送信バッファ追加
  * @param mode  光り方のパタン（LP3B_NOMAL|LP3B_FLASH|LP3B_PULS）
@@ -234,6 +209,21 @@ static auto tarnMute = [&](uint8_t* pMuteBuff,uint8_t x,uint8_t y){
 
 };
 
+/*****************
+ * Launch pad への送信
+ * @param data  出力したい描画情報
+ * @param y 押されたボタンのy軸(0～1)
+ */
+static auto outLaunchPad = [&](){
+    if(lpEnable)
+    {
+        // 出力
+        out1 = mpDispLp3;
+    }
+};
+
+
+
 /***********************************************************************
 * 初期化処理
  ***********************************************************************/
@@ -243,7 +233,7 @@ static auto initDrow = [&](){
     // LaunchPadへの送信バッファ設定
     reDrow();
     // 自動送信されないのでLaunchPadへの送信を行う
-    out1 = mpDispLp3;
+    outLaunchPad();
 };
 
 /**********************************************
@@ -254,7 +244,7 @@ static auto onTimerFilter = [&](){
     // LaunchPadへの送信バッファ設定
     reDrow();
     // 自動送信されないのでLaunchPadへの送信を行う
-    out1 = mpDispLp3;
+    outLaunchPad();
 
 };
 
@@ -438,6 +428,11 @@ static auto releaseSolo = [&](){
  * @param value value値
  */
 static auto inputLaunchPad2 = [&](uint8_t x,uint8_t y,uint8_t value){
+
+    // LaunchPad制御制限されている場合は無視。
+    if(!lpEnable)
+    {   return; }
+
     if(x<LP3_maxXY) {
         // part areaを押した
         if(value > 0){
@@ -542,5 +537,5 @@ else if (@in1){
 
 // バッファがあればlaunchpadに送信
 if(0<mpDispLp3->size()){
-    out1 = mpDispLp3;
+    outLaunchPad();
 }

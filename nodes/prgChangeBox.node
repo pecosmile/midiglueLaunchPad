@@ -152,11 +152,10 @@ static auto drowProglamNo = [&](uint8_t prgNo) {
     Lp3::addDot(mpDispLp3,mode,x,LOCATE_Y + y,color);
 };
 
-// 再描画
+/***********************************************************************
+* 再描画
+ ***********************************************************************/
 static auto reDrow = [&](){
-    // 描画不要
-    if(!lpEnable) { return; }
-
     // 描画位置に対応するprogram No
     // note:座標位置確定毎にgetProgramNoを呼んでもいいけど、1ずつしか
     // 増えない事が確定しているので。
@@ -180,13 +179,33 @@ static auto reDrow = [&](){
     Lp3::addDot(mpDispLp3,LP3B_NOMAL,8,LOCATE_Y + 1,CL_CURSOR_DOWN);
 };
 
+/***********************************************************************
+ * 共通処理
+ ***********************************************************************/
 
+/*****************
+ * Launch pad への送信
+ * @param data  出力したい描画情報
+ * @param y 押されたボタンのy軸(0～1)
+ */
+static auto outLaunchPad = [&](){
+    if(lpEnable)
+    {
+        // 出力
+        out1 = mpDispLp3;
+    }
+};
 
- // 初期化
+/***********************************************************************
+* 初期化処理
+ ***********************************************************************/
 static auto initDrow = [&](){
+    // Launchpadバッファのクリア
     mpDispLp3->clear();
+    // LaunchPadへの送信バッファ設定
     reDrow();
-    out1 = mpDispLp3;
+    // 自動送信されないのでLaunchPadへの送信を行う
+    outLaunchPad();
 };
 
 
@@ -270,6 +289,10 @@ static auto inputProgramChange = [&](uint8_t x,uint8_t y,uint8_t value){
 
 // 入力：LaunchPad
 static auto inputLaunchPad = [&](MidiPacket midi){
+    // LaunchPad制御制限されている場合は無視。
+    if(!lpEnable)
+    {   return; }
+
 
     // 押された場所の取得
     static uint8_t x;
@@ -320,5 +343,5 @@ else if (@in2) { // LaunchPadからの入力
 
 // バッファがあればlaunchpadに送信
 if(0<mpDispLp3->size()){
-    out1 = mpDispLp3;
+    outLaunchPad();
 }

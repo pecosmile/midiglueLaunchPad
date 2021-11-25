@@ -117,7 +117,7 @@ static auto drowEvent = Midiglue::make_cyclic_us_event<>(drowLaunchPad);
 // セットアップ
 if (@setup){
     // 初期表示イベント設定（1回のみ）
-    initEvent->schedule(800 * 1000);
+    initEvent->schedule(1000 * 1000);
     // 描画イベント（定期的に呼び出し）
     drowEvent->schedule(${Interval} * 1000);
 }
