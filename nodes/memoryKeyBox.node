@@ -1,11 +1,13 @@
 <Comment>
-lp3NodeTemplate
+memoryKeyBox
 
 kokou ni-sui@sabaco
 
 <I/O>
+input Int : LaunchPad制御（0=Disable）
 input MidiPacket : launchpadからの入力
 output IntList : launchpadへの出力
+output MidiPacket : midi出力
 
 
 <Description>
@@ -18,7 +20,7 @@ lpControlを使うNodeのテンプレート
 
 <Parameter>
 parameter Locate = 0 : 描画位置(0-6)
-parameter Height = 4 : 描画範囲(2-8)
+parameter DoubleKey = false : キーボードを2段にする。
 
 <Setup>
 // Bung設定
@@ -31,7 +33,12 @@ ${this}( &(Midiglue::__bang) , Midiglue::SETUP );
 **********************************************/
 static const uint8_t LOCATE_Y = ${Locate};  // 基準位置（縦）
 static const uint8_t BOXSIZE_X = 8;         // サイズ（横）
-static const uint8_t BOXSIZE_Y = ${Height}; // サイズ（縦）
+
+// キーボード描画用
+static const uint8_t KEY_Z = LP3C_BLACK;    // キー（なし）
+static const uint8_t KEY_A = LP3C_L_GREEN;  // メジャーキー
+static const uint8_t KEY_B = LP3C_Y_GREEN;  // マイナーキー
+static const uint8_t KEY_C = LP3C_GREEN;    // Cキー
 
 /*********************************************
  * 変数
@@ -40,7 +47,14 @@ static const uint8_t BOXSIZE_Y = ${Height}; // サイズ（縦）
 static IntList mpDispLp3 = Midiglue::init_default<IntList>();
 // LaunchPad入出力許可フラグ
 static bool lpEnable = true;
+// オクターブ
+static bool mOctave = 4;
 
+// キーボード 
+static const uint8_t keyColor[2][8] = {
+    {KEY_Z,KEY_B,KEY_B,KEY_Z,KEY_B,KEY_B,KEY_B,KEY_Z},
+    {KEY_C,KEY_A,KEY_A,KEY_A,KEY_A,KEY_A,KEY_A,KEY_C},
+};
 
 /*********************************************
  * 関数
@@ -62,24 +76,47 @@ static auto outLaunchPad = [&](){
 };
 
 /*****************
- * 表示のreDrow
+ * 指定位置のカラー定数を返す
+ * @param x     座標(x) → 0～7
+ * @param y     座標(y) → 0～1（相対位置で指定）
  */
-static auto reDrow = [&](){
-    for(int y=0;y<BOXSIZE_Y;y++){
-        // 指定した段の色を取得
-        for(int x=0;x<BOXSIZE_X;x++){
-            uint8_t color = LP3C_DK_GLAY;
-            uint8_t mode = LP3B_NOMAL;
-            // LP3への送信
-            Lp3::addDot(mpDispLp3,mode,x,LOCATE_Y + y,color);
+static auto getColor = [&](uint8_t x,uint8_t y) -> uint8_t {
+    return(keyColor[y][x]);
+};
+
+/*****************
+ * キーボードreDrow
+ * @param octave    オクターブ
+ * @param 
+ */
+static auto reDrowKey = [&](uint8_t octave,uint8_t locY){
+    for(int y=0;y<2;y++){
+        for(int x=0;x<LP3_maxXY;x++){
+            Lp3::addDot(mpDispLp3,LP3B_NOMAL,x,locY + y,getColor(x,y));
         }
     }
 };
+
+/*****************
+ * 表示のreDrow
+ */
+static auto reDrow = [&](){
+    // keyMemory表示（１段目）
+
+    // keyBord表示（２段目）
+    reDrowKey(mOctave,LOCATE_Y+1);
+
+    // keyBord表示（３段目）
+    reDrowKey(mOctave-1,LOCATE_Y+3);
+
+};
+
 
 /***********************************************************************
 * 初期化処理
  ***********************************************************************/
 static auto initDrow = [&](){
+    Midiglue::Debug::write_log("initDrow",0);
     // Launchpadバッファのクリア
     mpDispLp3->clear();
     // LaunchPadへの送信バッファ設定
@@ -96,21 +133,21 @@ static auto initDrow = [&](){
  */
 static auto pushButtun = [&](uint8_t x,uint8_t y,uint8_t value){
     // Midiglue::Debug::write_log("inputProgramChange", x*10+y);
-    // boxの範囲内であることを確認(縦)
-    if(y < LOCATE_Y || y >= (LOCATE_Y + BOXSIZE_Y)){
-        return;
-    }
-    // // y軸補正
-    // y -= LOCATE_Y;
+    // // boxの範囲内であることを確認(縦)
+    // if(y < LOCATE_Y || y >= (LOCATE_Y + BOXSIZE_Y)){
+    //     return;
+    // }
+    // // // y軸補正
+    // // y -= LOCATE_Y;
 
-    // boxの範囲内であることを確認(横)
-    if(x<LP3_maxXY){
-        // LP3への送信
-        Lp3::addDot(mpDispLp3,LP3B_FLASH,x,y,LP3C_YELLOW);
-    }
-    else { // ボックスの右側[>] が押されている。
+    // // boxの範囲内であることを確認(横)
+    // if(x<LP3_maxXY){
+    //     // LP3への送信
+    //     Lp3::addDot(mpDispLp3,LP3B_FLASH,x,y,LP3C_YELLOW);
+    // }
+    // else { // ボックスの右側[>] が押されている。
 
-    }
+    // }
 
 };
 
@@ -121,17 +158,17 @@ static auto inputLaunchPad = [&](MidiPacket packet){
     if(!lpEnable)
     {   return; }
 
-    // LaunchPadからの入力
-    // 押された場所の取得
-    static uint8_t x;
-    static uint8_t y;
-    if(Lp3::getLocation(packet,&x,&y)){
-        // 最上段のボタンクリック
-        reDrow();
-    }else {
-        // そのほかのボタン
-        pushButtun(x,y,packet.getControlValue());
-    };
+    // // LaunchPadからの入力
+    // // 押された場所の取得
+    // static uint8_t x;
+    // static uint8_t y;
+    // if(Lp3::getLocation(packet,&x,&y)){
+    //     // 最上段のボタンクリック
+    //     reDrow();
+    // }else {
+    //     // そのほかのボタン
+    //     pushButtun(x,y,packet.getControlValue());
+    // };
 
 
 };
@@ -154,8 +191,16 @@ if (@setup){
     // 3秒後に初期表示処理を呼び出す
     initEvent->schedule(3000 * 1000);
 }
-else if (@in0) { // LaunchPadからの入力
-    inputLaunchPad(in0);
+else if (@in0){ // Enable
+    if (in0 == 0) {
+        lpEnable = false;
+    } else {
+        lpEnable = true;
+        reDrow();
+    }
+}
+else if (@in1) { // LaunchPadからの入力
+    inputLaunchPad(in1);
 }
 
 // バッファがあればlaunchpadに送信
