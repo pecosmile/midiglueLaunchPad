@@ -34,6 +34,10 @@ ${this}( &(Midiglue::__bang) , Midiglue::SETUP );
 static const uint8_t LOCATE_Y = ${Locate};  // 基準位置（縦）
 static const uint8_t BOXSIZE_X = 8;         // サイズ（横）
 
+// メモリー描画用
+static const uint8_t MAMORY_EMP = LP3C_BLACK;   // メモリーあり
+static const uint8_t MAMORY_IN = LP3C_BLACK;    // メモリーなし
+
 // キーボード描画用
 static const uint8_t KEY_Z = LP3C_BLACK;    // キー（なし）
 static const uint8_t KEY_A = LP3C_L_GREEN;  // メジャーキー
@@ -50,8 +54,11 @@ static bool lpEnable = true;
 // オクターブ
 static bool mOctave = 4;
 
+// code Memory
+static const uint8_t mCodeMemory[8][4]; //TODO:init
+
 // キーボード 
-static const uint8_t keyColor[2][8] = {
+static const uint8_t mKeyColor[2][8] = {
     {KEY_Z,KEY_B,KEY_B,KEY_Z,KEY_B,KEY_B,KEY_B,KEY_Z},
     {KEY_C,KEY_A,KEY_A,KEY_A,KEY_A,KEY_A,KEY_A,KEY_C},
 };
@@ -81,7 +88,83 @@ static auto outLaunchPad = [&](){
  * @param y     座標(y) → 0～1（相対位置で指定）
  */
 static auto getColor = [&](uint8_t x,uint8_t y) -> uint8_t {
-    return(keyColor[y][x]);
+    return(mKeyColor[y][x]);
+};
+/***********************************************************************
+ * メモリー処理
+ ***********************************************************************/
+
+
+/*****************
+ * count of memory
+ * @param meory
+ */
+static auto memoryCount = [&](uint8_t* memory) -> uint8_t {
+    uint8_t ret = 0;
+    for(int i=0;i<MAX_MEMORY;i++){
+        if(0<memory[i]){
+            ret++;
+        }
+    }
+    return(ret);
+};
+
+/*****************
+ * add of memory
+ * @param meory
+ */
+static auto memoryAdd = [&](uint8_t* memory,uint8_t note){
+    // check
+    for(int i=0;i<MAX_MEMORY;i++){
+        if(note == memory[i]){
+            return;
+        }
+    }
+    // add
+    for(int i=0;i<MAX_MEMORY;i++){
+        if(0 == memory[i]){
+            memory[i] = note;
+        }
+    }
+};
+
+/*****************
+ * delete of memory
+ * @param meory
+ */
+static auto memoryDelete = [&](uint8_t* memory,uint8_t note){
+    // check
+    for(int i=0;i<MAX_MEMORY;i++){
+        if(note == memory[i]){
+            memory[i] == 0;
+        }
+    }
+};
+
+/*****************
+ * reset of memory
+ * @param meory
+ */
+static auto memoryDelete = [&](uint8_t* memory){
+    // check
+    for(int i=0;i<MAX_MEMORY;i++){
+        memory[i] == 0;
+    }
+};
+
+/***********************************************************************
+ * 描画処理
+ ***********************************************************************/
+/*****************
+ * メモリーreDrow部分
+ */
+static auto reDrowMemory = [&](){
+    for(int x=0;x<LP3_maxXY;x++){
+        uint8_t color = (0==memoryCount(mCodeMemory[x]) ? C_MEMORY_ON ? C_MEMORY_OFF);
+        Lp3::addDot(mpDispLp3,LP3B_NOMAL,x,LOCATE_Y,color);
+
+    }
+
 };
 
 /*****************
