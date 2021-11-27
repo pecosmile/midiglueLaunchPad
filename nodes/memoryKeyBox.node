@@ -21,6 +21,8 @@ lpControlを使うNodeのテンプレート
 <Parameter>
 parameter Locate = 0 : 描画位置(0-6)
 parameter DoubleKey = false : キーボードを2段にする。
+parameter outputCh = 16 : 出力用MIDIチャンネル
+
 
 <Setup>
 // Bung設定
@@ -44,6 +46,26 @@ static const uint8_t KEY_A = LP3C_L_GREEN;  // メジャーキー
 static const uint8_t KEY_B = LP3C_Y_GREEN;  // マイナーキー
 static const uint8_t KEY_C = LP3C_GREEN;    // Cキー
 
+// キーボード描画用の定数
+static const uint8_t mKeyColor[2][8] = {
+    {KEY_Z,KEY_B,KEY_B,KEY_Z,KEY_B,KEY_B,KEY_B,KEY_Z},
+    {KEY_C,KEY_A,KEY_A,KEY_A,KEY_A,KEY_A,KEY_A,KEY_C},
+};
+
+// Key → note変換テーブル
+static const int mTblKey2Note[2][8] = {
+    {-1, 1, 3,-1, 6, 8,10,-1},
+    { 0, 2, 4, 5, 7, 9,11,12},
+};
+
+// note → Key変換テーブル（x,y)
+static const uint8_t mTblNote2KeyX[13] = {
+    0,1,1,2,2,3,4,4,5,5,6,6,7
+};
+static const uint8_t mTblNote2KeyY[13] = {
+    1,0,1,0,1,1,0,1,0,1,0,1,1
+};
+
 /*********************************************
  * 変数
 **********************************************/
@@ -54,28 +76,13 @@ static bool lpEnable = true;
 // オクターブ
 static bool mOctave = 4;
 
+// key Map
+static const std::map<uint8_t,uint8_t> mKeyMap;
+
+
 // code Memory
 static const uint8_t mCodeMemory[8][4]; //TODO:init
 
-// キーボード 
-static const uint8_t mKeyColor[2][8] = {
-    {KEY_Z,KEY_B,KEY_B,KEY_Z,KEY_B,KEY_B,KEY_B,KEY_Z},
-    {KEY_C,KEY_A,KEY_A,KEY_A,KEY_A,KEY_A,KEY_A,KEY_C},
-};
-
-// TBL:Key->note
-static const int mTblKey2Note[2][8] = {
-    {-1, 1, 3,-1, 6, 8,10,-1},
-    { 0, 2, 4, 5, 7, 9,11,12},
-};
-
-// TBL:note->Key
-static const uint8_t mTblNote2KeyX[13] = {
-    1,0,1,0,1,1,0,1,0,1,0,1,1
-};
-static const uint8_t mTblNote2KeyY[13] = {
-    0,1,1,2,2,3,4,4,5,5,6,6,7
-};
 
 
 
@@ -106,14 +113,58 @@ static auto outLaunchPad = [&](){
 static auto getColor = [&](uint8_t x,uint8_t y) -> uint8_t {
     return(mKeyColor[y][x]);
 };
-/***********************************************************************
- * メモリー処理
- ***********************************************************************/
 
+
+/***********************************************************************
+ * keyMap 処理
+ ***********************************************************************/
+/*****************
+ * keyMap追加
+ * @param note
+ */
+static auto keyMapAdd = [&](uint8_t note){
+    // keyに値が含まれている事を確認
+    if(mKeyMap.contains(note)){
+        mKeyMap[note]++;
+    }else{
+        mKeyMap[note]=1;
+        // note on 送信
+        out1 = MidiPacket::makeNote(${outputCh},note,0);
+    }
+
+};
 
 /*****************
- * count of memory
- * @param meory
+ * keyMap削除
+ * @param note
+ */
+static auto keyMapErase = [&](uint8_t note){
+    // keyに値が無い場合は処理無し
+    if(!mKeyMap.contains(note)){
+        return;
+    }
+    
+    // noteカウントを減らす
+    mKeyMap[note]--;
+
+    // 結果が0ならnote off
+
+    if(0==mKeyMap[note]){
+        mKeyMap.erase(note);
+        // note off 送信
+        out1 = MidiPacket::makeNote(${outputCh},note,0);
+    }
+
+
+};
+
+
+/***********************************************************************
+ * code Memory 処理
+ ***********************************************************************/
+/*****************
+ * メモリされたノートの数を数える
+ * @param meory メモリへのポインタ
  */
 static auto memoryCount = [&](uint8_t* memory) -> uint8_t {
     uint8_t ret = 0;
@@ -126,45 +177,51 @@ static auto memoryCount = [&](uint8_t* memory) -> uint8_t {
 };
 
 /*****************
- * add of memory
- * @param meory
+ * メモリにノートを追加
+ * @param meory メモリへのポインタ
+ * @param note  ノート
  */
 static auto memoryAdd = [&](uint8_t* memory,uint8_t note){
-    // check
+    // 重複したノートは追加しない
     for(int i=0;i<MAX_MEMORY;i++){
         if(note == memory[i]){
             return;
         }
     }
-    // add
+    // ノート追加
     for(int i=0;i<MAX_MEMORY;i++){
         if(0 == memory[i]){
             memory[i] = note;
+            // keyMap追加（note on送信)
+            keyMapAdd(note);
         }
     }
 };
 
 /*****************
- * delete of memory
- * @param meory
+ * ノートの削除
+ * @param meory メモリへのポインタ
+ * @param note  ノート
  */
 static auto memoryDelete = [&](uint8_t* memory,uint8_t note){
-    // check
+    // 重複するノートを削除
     for(int i=0;i<MAX_MEMORY;i++){
         if(note == memory[i]){
-            memory[i] == 0;
+            memory[i] = 0;
+            // keyMap削除（note off送信)
+            keyMapErase(note);
         }
     }
 };
 
 /*****************
- * reset of memory
- * @param meory
+ * 全てのノートを削除
+ * @param meory メモリへのポインタ
  */
 static auto memoryDelete = [&](uint8_t* memory){
     // check
     for(int i=0;i<MAX_MEMORY;i++){
-        memory[i] == 0;
+        memory[i] = 0;
     }
 };
 
