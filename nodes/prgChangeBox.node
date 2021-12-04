@@ -58,7 +58,7 @@ static const uint8_t mColor[8] = {
 // 色：現在プログラム
 static const uint8_t CL_NOW = LP3C_WHITE;
 // 色：選択中プログラム
-static const uint8_t CL_SETTING = LP3C_BL_PURPLE;
+static const uint8_t CL_SETTING = LP3C_BPURPLE;
 // 色：上下カーソル
 static const uint8_t CL_CURSOR_UP   = LP3C_L_YELLOW;
 static const uint8_t CL_CURSOR_DOWN = LP3C_L_YELLOW;

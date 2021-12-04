@@ -46,27 +46,60 @@
 // 10進の方が解りやすいので10進で書いています
 static const std::vector<uint8_t> LP3_yNo = {81,71,61,51,41,31,21,11,};
 /** カラー */
+// Light、dIm、Dark...
 static const uint8_t LP3C_BLACK = 0x00;
 static const uint8_t LP3C_DK_GLAY = 0x01;
 static const uint8_t LP3C_LGT_GLAY = 0x02;
 static const uint8_t LP3C_WHITE = 0x03;
+
+static const uint8_t LP3C_L_RED = 0x04;
 static const uint8_t LP3C_RED = 0x05;
+static const uint8_t LP3C_I_RED = 0x06;
 static const uint8_t LP3C_D_RED = 0x07;
+
 static const uint8_t LP3C_L_YELLOW = 0x0C;
 static const uint8_t LP3C_YELLOW = 0x0D;
-static const uint8_t LP3C_Y_GREEN = 0x11;
+static const uint8_t LP3C_I_YELLOW = 0x0E;
+static const uint8_t LP3C_D_YELLOW = 0x0F;
+
+static const uint8_t LP3C_L_YGREEN = 0x11;
+static const uint8_t LP3C_YGREEN = 0x12;
+static const uint8_t LP3C_I_YGREEN = 0x13;
+static const uint8_t LP3C_D_YGREEN = 0x14;
+
 static const uint8_t LP3C_L_GREEN = 0x14;
 static const uint8_t LP3C_GREEN = 0x15;
-static const uint8_t LP3C_LGY_BLUE = 0x25;
-static const uint8_t LP3C_GLY_BLUE = 0x27;
+static const uint8_t LP3C_I_GREEN = 0x16;
+static const uint8_t LP3C_D_GREEN = 0x17;
+
+static const uint8_t LP3C_L_LBLUE = 0x24;
+static const uint8_t LP3C_LBLUE = 0x25;
+static const uint8_t LP3C_I_LBLUE = 0x26;
+static const uint8_t LP3C_D_LBLUE = 0x27;
+
+static const uint8_t LP3C_L_BLUE = 0x28;
 static const uint8_t LP3C_BLUE = 0x29;
-static const uint8_t LP3C_G_BLUE = 0x2A;
+static const uint8_t LP3C_I_BLUE = 0x2A;
 static const uint8_t LP3C_D_BLUE = 0x2B;
-static const uint8_t LP3C_BL_PURPLE = 0x2D;
+
+static const uint8_t LP3C_L_BPURPLE = 0x2C;
+static const uint8_t LP3C_BPURPLE = 0x2D;
+static const uint8_t LP3C_I_BPURPLE = 0x2E;
+static const uint8_t LP3C_D_BPURPLE = 0x2F;
+
+static const uint8_t LP3C_L_PURPLE = 0x30;
 static const uint8_t LP3C_PURPLE = 0x31;
+static const uint8_t LP3C_I_PURPLE = 0x32;
+static const uint8_t LP3C_D_PURPLE = 0x33;
+
+static const uint8_t LP3C_L_PINK = 0x34;
 static const uint8_t LP3C_PINK = 0x35;
+static const uint8_t LP3C_I_PINK = 0x36;
+static const uint8_t LP3C_D_PINK = 0x37;
+
 static const uint8_t LP3C_ORANGE = 0x3C;
 static const uint8_t LP3C_L_ORANGE = 0x3D;
+
 /** モード */
 static const uint8_t LP3B_NOMAL = 0;    // ノーマル
 static const uint8_t LP3B_FLASH = 1;    // 点滅

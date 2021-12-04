@@ -38,7 +38,7 @@ static const uint8_t MB_LOC = ${locate};
 
 // muteButtun
 static const uint8_t CR_MUTE_LOCK = LP3C_D_RED;
-static const uint8_t CR_MUTE_UNLOCK = LP3C_LGY_BLUE;
+static const uint8_t CR_MUTE_UNLOCK = LP3C_LBLUE;
 static const uint8_t CR_SOLO = LP3C_L_ORANGE;
 
 // ステータス
@@ -107,7 +107,7 @@ static auto getColorMuteMode = [&](uint8_t x,uint8_t y) -> uint8_t {
 
     if(0 == (mFilter[y] & mask)){
         // Filterでoffになっている所は青色でオミットする。
-        onColor = LP3C_G_BLUE;
+        onColor = LP3C_I_BLUE;
         offColor = LP3C_D_BLUE;
     }else if(0 == (mMuteLock[y] & mask)){
         // muteLockされていない場所の場合は設定した色を返す
