@@ -36,10 +36,6 @@ ${this}( &(Midiglue::__bang) , Midiglue::SETUP );
 static const uint8_t LOCATE_Y = ${Locate};  // 基準位置（縦）
 static const uint8_t BOXSIZE_X = 8;         // サイズ（横）
 
-// メモリー描画用
-static const uint8_t C_MEMORY_ON = LP3C_BLACK;   // メモリーあり
-static const uint8_t C_MEMORY_OFF = LP3C_BLACK;    // メモリーなし
-
 // キーボード描画用の定数
 static const uint8_t MCOLOR_MAX = 5;
 static const uint8_t MEMORYCOLORS[MCOLOR_MAX] = {
@@ -49,7 +45,6 @@ static const uint8_t MEMORYCOLORS[MCOLOR_MAX] = {
     LP3C_LBLUE,
     LP3C_L_LBLUE
 };
-
 
 // キーボード描画用
 static const uint8_t KEY_Z = LP3C_BLACK;        // キー（なし）
@@ -66,6 +61,11 @@ static const uint8_t mKeyColor[2][8] = {
     {KEY_Z,KEY_B,KEY_B,KEY_Z,KEY_B,KEY_B,KEY_B,KEY_Z},
     {KEY_C,KEY_A,KEY_A,KEY_A,KEY_A,KEY_A,KEY_A,KEY_C},
 };
+
+// 色：上下カーソル
+static const uint8_t CL_MEMORY_CLR  = LP3C_GREEN;       // メモリクリア
+static const uint8_t CL_CURSOR_UP   = LP3C_L_YELLOW;    // カーソル上
+static const uint8_t CL_CURSOR_DOWN = LP3C_L_YELLOW;    // カーソル舌
 
 // Key → note変換テーブル
 static const int mTblKey2Note[2][8] = {
@@ -96,6 +96,9 @@ static std::map<uint8_t,uint8_t> mKeyMap;
 static uint8_t mCodeMemory[8][4]; //TODO:init
 // code Memoryボタンを最後に押したNo
 static int mPushCMNo = -1;
+// Memory Clearボタンの状態（push = true)
+static bool mPushCMClear = false;
+
 // 2段目のキーボード有無（将来動的にする可能性があるため変数にする）
 static bool mSecondKey = ${DoubleKey};
 
@@ -207,10 +210,6 @@ static auto keyMapAdd = [&](uint8_t note){
         // 描画（追加）
         drowKey(note,100);
     }
-
-    Midiglue::Debug::write_log("keyMapAdd",mKeyMap[note]);
-
-
 };
 
 /*****************
@@ -227,9 +226,6 @@ static auto keyMapErase = [&](uint8_t note){
     mKeyMap[note]--;
 
     // 結果が0ならnote off
-    Midiglue::Debug::write_log("keyMapErase",mKeyMap[note]);
-
-
     if(0==mKeyMap[note]){
         mKeyMap.erase(note);
         // note off 送信
@@ -276,14 +272,13 @@ static auto getMemoryColor = [&](uint8_t x) -> uint8_t {
  * @param note  ノート
  */
 static auto memoryTurn = [&](uint8_t* memory,uint8_t note){
-    Midiglue::Debug::write_log("memoryTurn",note);
+    // Midiglue::Debug::write_log("memoryTurn",note);
 
     // メモリの空き位置
     int addIndex = -1;
 
     // ノートが重複していたら削除
     for(int i=0;i<MAX_MEMORY;i++){
-        Midiglue::Debug::write_log(" check1",memory[i]);
         if(note == memory[i]){
             memory[i] = 0;
             // keyMap削除（note off送信)
@@ -307,52 +302,27 @@ static auto memoryTurn = [&](uint8_t* memory,uint8_t note){
 };
 
 /*****************
- * メモリにノートを追加
- * @param meory メモリへのポインタ
- * @param note  ノート
- */
-static auto memoryAdd = [&](uint8_t* memory,uint8_t note){
-    // 重複したノートは追加しない
-    for(int i=0;i<MAX_MEMORY;i++){
-        if(note == memory[i]){
-            return;
-        }
-    }
-    // ノート追加
-    for(int i=0;i<MAX_MEMORY;i++){
-        if(0 == memory[i]){
-            memory[i] = note;
-            // keyMap追加（note on送信)
-            keyMapAdd(note);
-        }
-    }
-};
-
-/*****************
- * ノートの削除
- * @param meory メモリへのポインタ
- * @param note  ノート
- */
-static auto memoryErase = [&](uint8_t* memory,uint8_t note){
-    // 重複するノートを削除
-    for(int i=0;i<MAX_MEMORY;i++){
-        if(note == memory[i]){
-            memory[i] = 0;
-            // keyMap削除（note off送信)
-            keyMapErase(note);
-        }
-    }
-};
-
-/*****************
  * 全てのノートを削除
- * @param meory メモリへのポインタ
+ * @param x     座標(x) → 0～7
  */
-static auto memoryDelete = [&](uint8_t* memory){
+static auto memoryDelete = [&](uint8_t x){
+
+    // メモリへのポインタ
+    uint8_t* memory = mCodeMemory[x];
+
     // check
     for(int i=0;i<MAX_MEMORY;i++){
-        memory[i] = 0;
+        // memoryがあれば削除
+        if(0 < memory[i]){
+            // keyMap削除（note off送信)
+            keyMapErase(memory[i]);
+            memory[i] = 0;
+        }
     }
+
+    // 描画
+    Lp3::addDot(mpDispLp3,LP3B_NOMAL,x,LOCATE_Y,MEMORYCOLORS[0]);
+
 };
 
 /***********************************************************************
@@ -369,11 +339,11 @@ static auto reDrowMemory = [&](){
 };
 
 /*****************
- * キーボードreDrow
+ * キーボードreDrow2
  * @param octave    オクターブ
  * @param 
  */
-static auto reDrowKey = [&](uint8_t octave,uint8_t locY){
+static auto reDrowKey2 = [&](uint8_t octave,uint8_t locY){
     for(int y=0;y<2;y++){
         for(int x=0;x<LP3_maxXY;x++){
             Lp3::addDot(mpDispLp3,LP3B_NOMAL,x,locY + y,getColor(x,y));
@@ -382,21 +352,48 @@ static auto reDrowKey = [&](uint8_t octave,uint8_t locY){
 };
 
 /*****************
+ * キーボードreDrow
+ */
+static auto reDrowKey =[&](){
+    // keyBord表示（１段目）
+    reDrowKey2(mOctave,LOCATE_Y+1);
+    if(mSecondKey){
+        // keyBord表示（２段目）
+        reDrowKey2(mOctave-1,LOCATE_Y+3);
+    }
+};
+
+/*****************
+ * 外側の特殊キーのreDrow
+ */
+static auto reDrowFunc = [&](){
+
+    // クリア
+    Lp3::addDot(mpDispLp3,LP3B_NOMAL,LP3_maxXY,LOCATE_Y+0,CL_MEMORY_CLR);
+    // カーソル
+    Lp3::addDot(mpDispLp3,LP3B_NOMAL,LP3_maxXY,LOCATE_Y+1,CL_CURSOR_UP);
+    Lp3::addDot(mpDispLp3,LP3B_NOMAL,LP3_maxXY,LOCATE_Y+2,CL_CURSOR_DOWN);
+
+    if(mSecondKey){
+        // ２段目（空で描画する）
+        Lp3::addDot(mpDispLp3,LP3B_NOMAL,LP3_maxXY,LOCATE_Y+3,LP3C_BLACK);
+        Lp3::addDot(mpDispLp3,LP3B_NOMAL,LP3_maxXY,LOCATE_Y+4,LP3C_BLACK);
+    }
+
+};
+
+
+
+/*****************
  * 表示のreDrow
  */
 static auto reDrow = [&](){
-    // keyMemory表示（１段目）
+    // keyMemory表示
     reDrowMemory();
-
-    // keyBord表示（２段目）
-    reDrowKey(mOctave,LOCATE_Y+1);
-
-    if(mSecondKey){
-        // keyBord表示（３段目）
-        reDrowKey(mOctave-1,LOCATE_Y+3);
-    }
-
+    // Keybord表示
+    reDrowKey();
     // 外部ボタン
+    reDrowFunc();
 
 };
 
@@ -421,6 +418,13 @@ static auto initDrow = [&](){
  * @param value value値
  */
 static auto pushCordMemory = [&](uint8_t x,uint8_t value){
+
+    // clearが押されている場合はメモリクリア。
+    if(mPushCMClear){
+        if(0!=value){
+            memoryDelete(x);
+        }
+    }
 
     // 登録されたnoteがあればKeyMapを通してNoteを送る
     for(int i=0;i<MAX_MEMORY;i++){
@@ -492,6 +496,62 @@ static auto pushKey = [&](uint8_t x,uint8_t y,bool second,uint8_t value){
 
 };
 
+/*****************
+ * オクターブ上げ
+ * @param value value値
+ */
+static auto pushOctaveUp = [&](){
+    if(mOctave<6){ mOctave++; }
+    reDrowKey();
+};
+/*****************
+ * オクターブ下げ
+ */
+static auto pushOctaveDown = [&](){
+
+    // 最小値が２段目の有無で決まる
+    // ２段目がある場合は0にはできない
+    if(mOctave>(mSecondKey?1:0)){ mOctave--; }
+    reDrowKey();
+};
+
+/*****************
+ * memory clear ボタンクリック
+ * @param value value値
+ */
+static auto pushMemoryClear = [&](uint8_t value){
+
+    // code memoryの状態を保持（push = true)
+    mPushCMClear = (0 < value);
+    // push かつ、code memoryが押されている場合は、そのmemoeyを削除    
+    if(mPushCMClear && 0 <= mPushCMNo){
+        memoryDelete(mPushCMNo);
+    }
+};
+
+/*****************
+ * keyボタンクリック
+ * @param y 押されたボタンのy軸(0～6)
+ * @param value value値
+ */
+static auto pushFunc = [&](uint8_t y,uint8_t value){
+    if(0==y){
+        // push clear
+        pushMemoryClear(value);
+        return;
+    }
+
+    // オクターブはon時のみ
+    if(0 < value){
+        if(1==y) {
+            pushOctaveUp();
+            return;
+        } else if(2==y){
+            pushOctaveDown();
+            return;
+        }
+    }
+};
 
 /*****************
  * LaunchPadからの入力
@@ -524,10 +584,9 @@ static auto pushButtun = [&](uint8_t x,uint8_t y,uint8_t value){
             pushKey(x,y-3,true,value);
             break;
         }
-
     }
     else { // ボックスの右側[>] が押されている。
-
+        pushFunc(y,value);
     }
 
 };
