@@ -90,8 +90,10 @@ static IntList mpDispLp3 = Midiglue::init_default<IntList>();
 static bool lpEnable = true;
 // オクターブ
 static uint8_t mOctave = 3;
-// key Map(キーボードが押されている事をチェック)
+// key Map(押されているノートを管理するマップ))
 static std::map<uint8_t,uint8_t> mKeyMap;
+// push Map(キーボードが押されている位置と、ノート番号を紐付けるキー)
+static std::map<uint8_t,uint8_t> mPushMap;
 // code Memoryの状態
 static uint8_t mCodeMemory[8][4]; //TODO:init
 // code Memoryボタンを最後に押したNo
@@ -109,6 +111,7 @@ static bool mSecondKey = ${DoubleKey};
 
 // BOXの高さ（２段目のキーボードの有無で決まる）
 #define BOXSIZE_Y ( mSecondKey ? 5 :3 )
+
 
 
 /*********************************************
@@ -199,9 +202,17 @@ static auto drowKey = [&](uint8_t note,uint8_t value){
  * keyMap追加
  * @param note
  */
+static auto isOnNote = [&](uint8_t note) -> bool {
+    // keyに値が含まれている事を確認
+    return(0 < mKeyMap.count(note));
+};
+/*****************
+ * keyMap追加
+ * @param note
+ */
 static auto keyMapAdd = [&](uint8_t note){
     // keyに値が含まれている事を確認
-    if(0 < mKeyMap.count(note)){
+    if(isOnNote(note)){
         mKeyMap[note]++;
     }else{
         mKeyMap[note]=1;
@@ -218,7 +229,7 @@ static auto keyMapAdd = [&](uint8_t note){
  */
 static auto keyMapErase = [&](uint8_t note){
     // keyに値が無い場合は処理無し
-    if(0==mKeyMap.count(note)){
+    if(!isOnNote(note)){
         return;
     }
     
@@ -345,8 +356,18 @@ static auto reDrowMemory = [&](){
  */
 static auto reDrowKey2 = [&](uint8_t octave,uint8_t locY){
     for(int y=0;y<2;y++){
+
+        uint8_t baseNote = octave * 12;
         for(int x=0;x<LP3_maxXY;x++){
-            Lp3::addDot(mpDispLp3,LP3B_NOMAL,x,locY + y,getColor(x,y));
+            int tmpNote = mTblKey2Note[y][x];
+            if(0 <= tmpNote){
+                // note計算
+                uint8_t note = (uint8_t)tmpNote + baseNote;
+                // 色
+                uint8_t color = (isOnNote(note)) ? LP3C_RED : getColor(x,y);
+                // 描画
+                Lp3::addDot(mpDispLp3,LP3B_NOMAL,x,locY + y,color);
+            }
         }
     }
 };
@@ -452,18 +473,18 @@ static auto pushCordMemory = [&](uint8_t x,uint8_t value){
 };
 
 /*****************
- * keyボタンクリック
+ * keyボタンPush
  * @param x 押されたボタンのX軸(0～8)
  * @param y 押されたボタンのy軸(0～1)
  * @param second 2段目選択
- * @param value value値
  */
-static auto pushKey = [&](uint8_t x,uint8_t y,bool second,uint8_t value){
+static auto pushKey = [&](uint8_t x,uint8_t y){
 
     // Midiglue::Debug::write_log("pushKey", x*10+y);
 
     // 押した位置をキーボードに置き換える
-    int tmpNote = mTblKey2Note[y][x];
+    // 1段目|2段目どちらでも対応するため、y=y%2とする
+    int tmpNote = mTblKey2Note[y%2][x];
 
     // Midiglue::Debug::write_log("pushKey-tmpNote", tmpNote);
 
@@ -472,8 +493,8 @@ static auto pushKey = [&](uint8_t x,uint8_t y,bool second,uint8_t value){
         return;
     }
 
-    // octorb計算
-    uint8_t octave = mOctave - (second ? 1 : 0) ;
+    // octorb計算(2段目の場合はオクターブをいっこ下げる)
+    uint8_t octave = mOctave - ((2<=y) ? 1 : 0) ;
     // note計算
     uint8_t note = (uint8_t)tmpNote + octave * 12;
 
@@ -481,19 +502,36 @@ static auto pushKey = [&](uint8_t x,uint8_t y,bool second,uint8_t value){
 
     if(0 <= mPushCMNo){
         // code momoryを押していたらメモリに追加 or 削除
-        if(0 < value){ // onの時だけ
-            // メモリーからnoteの追加 | 削除
-            memoryTurn(mCodeMemory[mPushCMNo],note);
-            // 指定位置を描画
-            Lp3::addDot(mpDispLp3,LP3B_NOMAL
-                ,mPushCMNo,LOCATE_Y,getMemoryColor(mPushCMNo));
-        }
+        // メモリーからnoteの追加 | 削除
+        memoryTurn(mCodeMemory[mPushCMNo],note);
+        // 指定位置を描画
+        Lp3::addDot(mpDispLp3,LP3B_NOMAL
+            ,mPushCMNo,LOCATE_Y,getMemoryColor(mPushCMNo));
     }else{
         // Key操作
-        if(0 < value){  keyMapAdd(note);    }
-        else{           keyMapErase(note);  }
+        keyMapAdd(note);
+        // 押した位置とnoteをMap管理
+        mPushMap[x + y*LP3_maxXY] = note;
     }
 
+};
+
+
+/*****************
+ * keyボタンrelease
+ * @param x 離したボタンのX軸(0～8)
+ * @param y 離したボタンのy軸(0～1)
+ * @param second 2段目選択
+ * @param value value値
+ */
+static auto releaseKey = [&](uint8_t x,uint8_t y){
+    // 位置計算
+    uint8_t keyNo = x + y*LP3_maxXY;
+    // keyに値が含まれている事を確認
+    // あれば、そのnoteのrelease処理
+    if(0 < mPushMap.count(keyNo)){
+        keyMapErase(mPushMap[keyNo]);
+    }
 };
 
 /*****************
@@ -569,20 +607,19 @@ static auto pushButtun = [&](uint8_t x,uint8_t y,uint8_t value){
     // y軸補正
     y -= LOCATE_Y;
 
+
     // boxの範囲内であることを確認(横)
     if(x<LP3_maxXY){
-        switch(y){
-        case 0:// code memory
+        if(0==y){
+            // code Memory 処理
             pushCordMemory(x,value);
-            break;
-        case 1:// key bord1
-        case 2:
-            pushKey(x,y-1,false,value);
-            break;
-        case 3:// key bord2
-        case 4:
-            pushKey(x,y-3,true,value);
-            break;
+        }
+        else if(0 < value){
+            // keyを押した場合
+            pushKey(x,y-1);
+        } else if(0 > mPushCMNo) {
+            // keyを離した場合の処理(Memory以外)
+            releaseKey(x,y-1);
         }
     }
     else { // ボックスの右側[>] が押されている。
