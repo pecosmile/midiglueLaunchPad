@@ -359,15 +359,18 @@ static auto reDrowKey2 = [&](uint8_t octave,uint8_t locY){
 
         uint8_t baseNote = octave * 12;
         for(int x=0;x<LP3_maxXY;x++){
+            // 何も無いところは黒で埋める
+            uint8_t color = KEY_Z;
+            // 対称位置のノートを取得            
             int tmpNote = mTblKey2Note[y][x];
             if(0 <= tmpNote){
                 // note計算
                 uint8_t note = (uint8_t)tmpNote + baseNote;
                 // 色
-                uint8_t color = (isOnNote(note)) ? LP3C_RED : getColor(x,y);
-                // 描画
-                Lp3::addDot(mpDispLp3,LP3B_NOMAL,x,locY + y,color);
+                color = (isOnNote(note)) ? LP3C_RED : getColor(x,y);
             }
+            // 描画
+            Lp3::addDot(mpDispLp3,LP3B_NOMAL,x,locY + y,color);
         }
     }
 };

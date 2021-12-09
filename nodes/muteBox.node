@@ -288,7 +288,7 @@ static auto inputMuteXXX = [&](IntList buff){
         // 描画前にフィルタを介したデータをmuteXXXに送信する
         sendMuteXXX(0);
         // launchpadへの描画
-        Midiglue::Debug::write_log("reDrow A", 0);
+        // Midiglue::Debug::write_log("reDrow A", 0);
         reDrow();
     }
 };
