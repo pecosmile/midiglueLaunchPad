@@ -5,7 +5,7 @@ kokou ni-sui@sabaco
 
 <I/O>
 input MidiPacket : launchpadからの入力
-output IntList : launchpadへの出力
+output IntList : 描画情報。lpControlへの接続します。
 
 
 <Description>

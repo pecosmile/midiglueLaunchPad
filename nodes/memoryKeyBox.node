@@ -6,14 +6,15 @@ kokou ni-sui@sabaco
 <I/O>
 input Int : LaunchPad制御（0=Disable）
 input MidiPacket : launchpadからの入力
-output IntList : launchpadへの出力
+output IntList : 描画情報。lpControlへの接続します。
 output MidiPacket : midi出力
 
 
 <Description>
-lpControlを使うNodeのテンプレート
-押した部分の色が変わります。
-最上位のボタンを押すとクリア。
+code memory 機能付きのキーボードです。
+上段のボタン（メモリーキー）を押しながらキーボードを押すとコードを設定できます。
+メモリーが設定されたメモリーキーを押すと、設定したコードをmidiに出力します。
+表示範囲(高さ)：3～5
 
 ※ノード単体では動きません。main_template.cppに、専用の定数・クラスを設定する必要があります。
 
@@ -359,15 +360,18 @@ static auto reDrowKey2 = [&](uint8_t octave,uint8_t locY){
 
         uint8_t baseNote = octave * 12;
         for(int x=0;x<LP3_maxXY;x++){
+            // 何も無いところは黒で埋める
+            uint8_t color = KEY_Z;
+            // 対称位置のノートを取得            
             int tmpNote = mTblKey2Note[y][x];
             if(0 <= tmpNote){
                 // note計算
                 uint8_t note = (uint8_t)tmpNote + baseNote;
                 // 色
-                uint8_t color = (isOnNote(note)) ? LP3C_RED : getColor(x,y);
-                // 描画
-                Lp3::addDot(mpDispLp3,LP3B_NOMAL,x,locY + y,color);
+                color = (isOnNote(note)) ? LP3C_RED : getColor(x,y);
             }
+            // 描画
+            Lp3::addDot(mpDispLp3,LP3B_NOMAL,x,locY + y,color);
         }
     }
 };

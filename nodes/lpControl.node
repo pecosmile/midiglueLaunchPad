@@ -1,7 +1,7 @@
 <Comment>
 lpControl
 LaunchPad描画のSysExを出力します。
-LaunchPadをProgrammer modeに設定する必要があります。
+起動後に、LaunchPadをProgramer modeに設定します。
 詳しくは「Launchpad mini mk3 Programmer’s reference manual」を参照してください。
 
 inputには、３バイト単位で[光点モード][光らせる位置][色]を送ります。
@@ -12,7 +12,7 @@ inputには、３バイト単位で[光点モード][光らせる位置][色]を
 kokou ni-sui@sabaco
 
 <I/O>
-input IntList : mute処理情報(muteBox)
+input IntList : 描画情報
 output MidiSysEx : 描画情報(LaunchPad mini 3)
 
 <Description>
@@ -62,7 +62,12 @@ static MidiSysEx sysex{0u, nullptr};
 /*********************************************
  * 関数
 **********************************************/
-// LaunchPadへの描画データ送信（単位時間ごとのSysEx吐き出し）
+/*****************
+ * LaunchPad初期化
+ * LaunchPad mini mk3 をプログラマモードに
+ * するためのSysExを送る
+ */
+// 
 static auto initLaunchPad = [&](){
     // SysExとして送信
     sysex.len = LP3_INIT_SYSEX_SIZE;

@@ -11,10 +11,19 @@ input IntList : ミュート処理情報(muteXXX)
 input MidiPacket : ボタン入力情報(LaunchPad) 
 input Int : muteLock解除bung(1を受けるとmuteLock解除)
 output IntList : ミュート処理情報(muteXXX)
-output IntList : 描画情報(lpControl)
+output IntList : 描画情報。lpControlへの接続します。
 
 <Description>
-TODO:後で書く
+MuteXXXと連携をして、MUTEの送信を行います。
+MuteXXXを変えることで、複数の機種に対応が可能です。
+GroobeBox側に機能があれば、MUTE状態を取得して表示することも可能です。
+最右には、MuteLockボタンと、soloボタンがあります。
+soloボタンはelectribe順序の動作をします
+MuteLockを押しながらmuteをすると、その操作はmuteLock解除bungを
+受けるまで保留されます。（barGageBoxとの連携機能です）
+
+※ノード単体では動きません。main_template.cppに、専用の定数・クラスを設定する必要があります。
+
 
 <Parameter>
 parameter locate = 6 : 0-6 muteBoxを置く位置
@@ -288,7 +297,7 @@ static auto inputMuteXXX = [&](IntList buff){
         // 描画前にフィルタを介したデータをmuteXXXに送信する
         sendMuteXXX(0);
         // launchpadへの描画
-        Midiglue::Debug::write_log("reDrow A", 0);
+        // Midiglue::Debug::write_log("reDrow A", 0);
         reDrow();
     }
 };

@@ -1,0 +1,189 @@
+<Comment>
+selectBox
+
+kokou ni-sui@sabaco
+
+<I/O>
+input MidiPacket : launchpadからの入力
+output IntList : 描画情報。lpControlへの接続します。
+output Int : 選択した番号
+output Int : 出力(SESSION)
+output Int : 出力(DRUMS)
+output Int : 出力(KEYS)
+output Int : 出力(USER)
+
+<Description>
+LaunchPadの[session]～[user]のボタン制御
+
+※ノード単体では動きません。main_template.cppに、専用の定数・クラスを設定する必要があります。
+
+<Parameter>
+parameter ButtunNumber = 4 : ボタンの数
+
+
+<Setup>
+// Bung設定
+${this}( &(Midiglue::__bang) , Midiglue::SETUP );
+
+<Code>
+
+/*********************************************
+ * 定数
+**********************************************/
+// color
+static const uint8_t COLOR_PUSH = LP3C_RED;
+static const uint8_t COLOR_SESSION = LP3C_LBLUE;
+static const uint8_t COLOR_DRUMS = LP3C_GREEN;
+static const uint8_t COLOR_KEYS = LP3C_YELLOW;
+static const uint8_t COLOR_USER = LP3C_PINK;
+// push munber
+static const uint8_t NUM_SESSION = 0;
+static const uint8_t NUM_DRUMS = 1;
+static const uint8_t NUM_KEYS = 2;
+static const uint8_t NUM_USER = 3;
+
+/*********************************************
+ * 変数
+**********************************************/
+// Launchpad 描画情報
+static IntList mpDispLp3 = Midiglue::init_default<IntList>();
+
+// 最後に押したボタン
+static uint8_t mPushKeyNo = 0;
+
+
+/*********************************************
+ * 関数
+**********************************************/
+/***********************************************************************
+ * 共通処理
+ ***********************************************************************/
+/****
+ *色の取得
+ */
+
+/*****************
+ * 指定位置のカラー定数を返す
+ */
+static auto getColor = [&](uint8_t key) -> uint8_t {
+    if(mPushKeyNo == key){
+        return(COLOR_PUSH);
+    }
+
+    uint8_t color;
+    switch(key)
+    {
+    case NUM_SESSION:
+        color = COLOR_SESSION;
+    break;
+    case NUM_DRUMS:
+        color = COLOR_DRUMS;
+    break;
+    case NUM_KEYS:
+        color = COLOR_KEYS;
+    break;
+    case NUM_USER:
+        color = COLOR_USER;
+    break;
+    }
+
+    return(color);
+};
+
+
+/*****************
+ * Launch pad への送信
+ * @param data  出力したい描画情報
+ * @param y 押されたボタンのy軸(0～1)
+ */
+static auto outLaunchPad = [&](){
+    // 出力
+    out0 = mpDispLp3;
+};
+
+/*****************
+ * 表示のreDrow
+ */
+static auto reDrow = [&](){
+    // SESSION
+    Lp3::addDotLoc(mpDispLp3,LP3B_NOMAL,LP3K_SESSION,getColor(NUM_SESSION));
+    // DRUMS
+    Lp3::addDotLoc(mpDispLp3,LP3B_NOMAL,LP3K_DRUMS,getColor(NUM_DRUMS));
+    // KEYS
+    Lp3::addDotLoc(mpDispLp3,LP3B_NOMAL,LP3K_KEYS,getColor(NUM_KEYS));
+    // USER
+    Lp3::addDotLoc(mpDispLp3,LP3B_NOMAL,LP3K_USER,getColor(NUM_USER));
+};
+
+// 入力：LaunchPad
+static auto inputLaunchPad = [&](uint8_t ccNo){
+
+    // Midiglue::Debug::write_log("inputLaunchPad 1",ccNo);
+    Lp3::addDotLoc(mpDispLp3,LP3B_NOMAL,LP3K_SESSION,LP3C_GREEN);
+
+
+    switch(ccNo){
+    case LP3K_SESSION:
+        mPushKeyNo = NUM_SESSION;
+    break;
+    case LP3K_DRUMS:
+        mPushKeyNo = NUM_DRUMS;
+    break;
+    case LP3K_KEYS:
+        mPushKeyNo = NUM_KEYS;
+    break;
+    case LP3K_USER:
+        mPushKeyNo = NUM_USER;
+    break;
+
+    }
+    // 指定値を出力
+    out1 = mPushKeyNo;
+
+    // ボタンに対応する出力を1、それ以外を0にする。
+    out2 = (mPushKeyNo == NUM_SESSION ) ? 1:0;
+    out3 = (mPushKeyNo == NUM_DRUMS ) ? 1:0;
+    out4 = (mPushKeyNo == NUM_KEYS ) ? 1:0;
+    out5 = (mPushKeyNo == NUM_USER ) ? 1:0;
+
+    reDrow();
+};
+
+/***********************************************************************
+* 初期化処理
+ ***********************************************************************/
+static auto initDrow = [&](){
+    // Launchpadバッファのクリア
+    mpDispLp3->clear();
+    // 初期表示を送信（redrow()は、メソッド内で送ります）
+    inputLaunchPad(mPushKeyNo);
+    // 自動送信されないのでLaunchPadへの送信を行う
+    outLaunchPad();
+};
+
+/*********************************************
+* 割り込みイベント
+**********************************************/
+// LaunchPadの初期表示
+static auto initEvent = Midiglue::make_oneshot_us_event<>(initDrow);
+
+/*********************************************
+* 実行処理
+**********************************************/
+
+// バッファクリア
+mpDispLp3->clear();
+
+// セットアップ
+if (@setup){
+    // 3秒後に初期表示処理を呼び出す
+    initEvent->schedule(3000 * 1000);
+}
+else if (@in0) { // LaunchPadからの入力
+    inputLaunchPad(in0.getControlNumber());
+}
+
+// バッファがあればlaunchpadに送信
+if(0<mpDispLp3->size()){
+    outLaunchPad();
+}

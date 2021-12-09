@@ -8,7 +8,7 @@ input Int : LaunchPad制御（0=Disable）
 input MidiPacket : proglam change入力
 input MidiPacket : launchpadからの入力
 output MidiPacket : proglam change出力
-output IntList : launchpadへの出力
+output IntList : 描画情報。lpControlへの接続します。
 
 <Description>
 LaunchPad上に、プログラムチェンジ用の画面を表示、押した場所に対応するプログラムを送ります。
@@ -177,6 +177,12 @@ static auto reDrow = [&](){
     // カーソル
     Lp3::addDot(mpDispLp3,LP3B_NOMAL,8,LOCATE_Y + 0,CL_CURSOR_UP);
     Lp3::addDot(mpDispLp3,LP3B_NOMAL,8,LOCATE_Y + 1,CL_CURSOR_DOWN);
+
+    // 外側を黒で塗る
+    for(int y=2;y<BOXSIZE_Y;y++){
+        Lp3::addDot(mpDispLp3,LP3B_NOMAL,8,LOCATE_Y + y,LP3C_BLACK);
+    }
+    
 };
 
 /***********************************************************************

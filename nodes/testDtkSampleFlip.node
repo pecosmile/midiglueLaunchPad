@@ -8,7 +8,7 @@ input Int : LaunchPad制御（0=Disable）
 input MidiPacket : clock入力
 input MidiPacket : launchpadからの入力
 output MidiPacket : proglam change出力
-output IntList : launchpadへの出力
+output IntList : 描画情報。lpControlへの接続します。
 
 
 <Description>

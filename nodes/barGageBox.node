@@ -1,21 +1,20 @@
 <Comment>
 barGageBox
-
-
 kokou ni-sui@sabaco
 
 <I/O>
 input Int : LaunchPad制御（0=Disable）
 input MidiPacket : clock入力
 input MidiPacket : launchpadからの入力
-output IntList : launchpadへの出力
+output IntList : 描画情報。lpControlへの接続します。
 output Int : 現在位置を数値で渡す Bung
 
 
 <Description>
-
+MIDIの同期信号を受け、Lunchpadに現在の再生位置を
+８小節単位で表示します。
+表示範囲(高さ)：1
 ※ノード単体では動きません。main_template.cppに、専用の定数・クラスを設定する必要があります。
-
 
 <Parameter>
 parameter Locate = 0 : 描画位置(0-7)
