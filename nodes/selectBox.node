@@ -5,7 +5,11 @@ kokou ni-sui@sabaco
 
 <I/O>
 input MidiPacket : launchpadからの入力
+<<<<<<< HEAD
 output IntList : 描画情報。lpControlへの接続します。
+=======
+output IntList : launchpadへの出力
+>>>>>>> 2d8a3530017a54f33d28e1198f96ad8eeba7d261
 output Int : 選択した番号
 output Int : 出力(SESSION)
 output Int : 出力(DRUMS)
