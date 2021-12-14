@@ -438,10 +438,6 @@ static auto releaseSolo = [&](){
  */
 static auto inputLaunchPad2 = [&](uint8_t x,uint8_t y,uint8_t value){
 
-    // LaunchPad制御制限されている場合は無視。
-    if(!lpEnable)
-    {   return; }
-
     if(x<LP3_maxXY) {
         // part areaを押した
         if(value > 0){
@@ -466,6 +462,11 @@ static auto inputLaunchPad2 = [&](uint8_t x,uint8_t y,uint8_t value){
 static auto inputLaunchPad = [&](MidiPacket packet){
     // note:launchpadのボタンを押したタイミングでcontrol value = 127、
     // 離したタイミングで value = 0が送られる。
+
+    // LaunchPad制御制限されている場合、onイベントは無視する。
+    // ※押しながら切り替えられる可能性があるため、offイベントは受ける
+    if(!lpEnable && 0 < packet.getControlValue())
+    {   return; }
 
     // 押された場所の取得
     static uint8_t x;

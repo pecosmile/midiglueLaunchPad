@@ -635,8 +635,9 @@ static auto pushButtun = [&](uint8_t x,uint8_t y,uint8_t value){
 // 入力：LaunchPad
 static auto inputLaunchPad = [&](MidiPacket packet){
 
-    // LaunchPad制御制限されている場合は無視。
-    if(!lpEnable)
+    // LaunchPad制御制限されている場合、onイベントは無視する。
+    // ※押しながら切り替えられる可能性があるため、offイベントは受ける
+    if(!lpEnable && 0 < packet.getControlValue())
     {   return; }
 
     // LaunchPadからの入力
