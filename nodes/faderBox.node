@@ -1,0 +1,284 @@
+<Comment>
+faderBox
+フェーダーを設定する。
+
+colorに使える設定は以下
+RED,YELLOW,YGREEN,GREEN,LBLUE,BLUE,BPURPLE,PURPLE
+
+kokou ni-sui@sabaco
+
+<I/O>
+input Int : LaunchPad制御（0=Disable）
+input MidiPacket : launchpadからの入力
+output IntList : 描画情報。lpControlへの接続します。
+
+
+<Description>
+lpControlを使うNodeのテンプレート
+押した部分の色が変わります。
+最上位のボタンを押すとクリア。
+
+※ノード単体では動きません。main_template.cppに、専用の定数・クラスを設定する必要があります。
+
+
+<Parameter>
+parameter Locate = 0 : 描画位置(0-6)
+parameter Height = 4 : 描画範囲(1-8)
+
+parameter Setting1 = "1,0,YELLOW" : (1)ch,ccNumber,Color
+parameter Setting2 = "2,0,YELLOW" : (2)ch,ccNumber,Color
+parameter Setting3 = "3,0,YELLOW" : (3)ch,ccNumber,Color
+parameter Setting4 = "4,0,YELLOW" : (4)ch,ccNumber,Color
+parameter Setting5 = "5,0,YELLOW" : (5)ch,ccNumber,Color
+parameter Setting6 = "6,0,YELLOW" : (6)ch,ccNumber,Color
+parameter Setting7 = "7,0,YELLOW" : (7)ch,ccNumber,Color
+parameter Setting8 = "8,0,YELLOW" : (8)ch,ccNumber,Color
+
+
+<Setup>
+// Bung設定
+${this}( &(Midiglue::__bang) , Midiglue::SETUP );
+
+<Code>
+
+/*********************************************
+ * 定数
+**********************************************/
+static const uint8_t LOCATE_Y = ${Locate};  // 基準位置（縦）
+static const uint8_t BOXSIZE_X = 8;         // サイズ（横）
+static const uint8_t BOXSIZE_Y = ${Height}; // サイズ（縦）
+
+
+// 色設定
+static const uint8_t RED = LP3C_RED;
+static const uint8_t YELLOW = LP3C_YELLOW;
+static const uint8_t YGREEN = LP3C_YGREEN;
+static const uint8_t GREEN = LP3C_GREEN;
+static const uint8_t LBLUE = LP3C_LBLUE;
+static const uint8_t BLUE = LP3C_BLUE;
+static const uint8_t BPURPLE = LP3C_BPURPLE;
+static const uint8_t PURPLE = LP3C_PURPLE;
+
+// 色指定（相対）
+// FADERの額
+static const int CR_LEFT    = -1;   // 左端
+static const int CR_MIDDLE  = +1;   // 0～99
+static const int CR_HIGH    = 0;    // 100～127
+static const int CR_BACK    = +2;   // 100～127
+
+// 色指定
+static const int TBL_COLOR[]={
+    CR_LEFT,
+    CR_MIDDLE,
+    CR_MIDDLE,
+    CR_MIDDLE,
+    CR_MIDDLE,
+    CR_MIDDLE,
+    CR_HIGH,
+    CR_HIGH,
+};
+
+// fader value
+static const uint8_t TBL_VALUE[]={
+    0,              // CR_LEFT
+    20,             // CR_MIDDLE
+    40,             // CR_MIDDLE
+    60,             // CR_MIDDLE
+    80,             // CR_MIDDLE
+    100,            // CR_MIDDLE
+    114,            // CR_HIGH
+    127,            // CR_HIGH
+};
+
+// 長押し判定する拍数
+static const uint8_t LONG_PRESS 16;
+
+// フェーダー設定
+struct FaderSetting{
+    uint8_t ch;         // channel
+    uint8_t ccNumber;   // cc number
+    uint8_t color;      // color       
+}
+
+// フェーダー状態
+struct FaderParam{
+    uint8_t value;      // 現在の値
+    uint8_t valueGaul;  // fader移動のGaul
+    uint8_t startTime;  // fader開始時の位置
+}
+
+
+/*********************************************
+ * 変数
+**********************************************/
+// Launchpad 描画情報
+static IntList mpDispLp3 = Midiglue::init_default<IntList>();
+// LaunchPad入出力許可フラグ
+static bool lpEnable = true;
+
+// Fader設定
+static FaderSetting mFaderSetting[] = {
+    {${Setting1}},  // fader 1
+    {${Setting2}},  // fader 2
+    {${Setting3}},  // fader 3
+    {${Setting4}},  // fader 4
+    {${Setting5}},  // fader 5
+    {${Setting6}},  // fader 6
+    {${Setting7}},  // fader 7
+    {${Setting8}},  // fader 8
+};
+
+// 各値のValue値
+static FaderParam mFaderParam[8] = {
+    {100,100,0},    // fader 1
+    {100,100,0},    // fader 2
+    {100,100,0},    // fader 3
+    {100,100,0},    // fader 4
+    {100,100,0},    // fader 5
+    {100,100,0},    // fader 6
+    {100,100,0},    // fader 7
+    {100,100,0},    // fader 8
+};
+
+
+
+/*********************************************
+ * 関数
+**********************************************/
+/***********************************************************************
+ * 共通処理
+ ***********************************************************************/
+/*****************
+ * Launch pad への送信
+ * @param data  出力したい描画情報
+ * @param y 押されたボタンのy軸(0～1)
+ */
+static auto outLaunchPad = [&](){
+    if(lpEnable)
+    {
+        // 出力
+        out0 = mpDispLp3;
+    }
+};
+
+/*****************
+ * フェーダーのreDrow
+ * @param y Y軸（相対位置）
+ */
+static auto reDrowFader = [&](uint8_t y){
+    // y軸によるデータ取得
+    uint8_t ch = mFaderSetting[y].ch;                 // channel
+    // uint8_t ccNumber = mFaderSetting[y].ccNumber;     // cc number
+    uint8_t color = mFaderSetting[y].color;           // color
+    uint8_t value = mValue[y];                      // value
+
+    for(int i=0;i<8;i++){
+        // valueに合った箇所まで色を付ける
+        int add = (TBL_VALUE[i] <= value) ? CR_BACK:TBL_COLOR[i];
+        Lp3::addDot(mpDispLp3,mode,1+i,LOCATE_Y + y,color+add);
+    }
+
+};
+
+/*****************
+ * 表示のreDrow
+ */
+static auto reDrow = [&](){
+    for(int y=0;y<BOXSIZE_Y;y++){
+        reDrowFader(y);
+    }
+k};
+
+/***********************************************************************
+* 初期化処理
+ ***********************************************************************/
+static auto initDrow = [&](){
+    // Launchpadバッファのクリア
+    mpDispLp3->clear();
+    // LaunchPadへの送信バッファ設定
+    reDrow();
+    // 自動送信されないのでLaunchPadへの送信を行う
+    outLaunchPad();
+};
+
+/*****************
+ * LaunchPadからの入力
+ * @param x 押されたボタンのX軸(0～8)
+ * @param y 押されたボタンのy軸(0～8)
+ * @param value value値
+ */
+static auto pushButtun = [&](uint8_t x,uint8_t y,uint8_t value){
+    // Midiglue::Debug::write_log("inputProgramChange", x*10+y);
+    // boxの範囲内であることを確認(縦)
+    if(y < LOCATE_Y || y >= (LOCATE_Y + BOXSIZE_Y)){
+        return;
+    }
+    // // y軸補正
+    y -= LOCATE_Y;
+
+    // boxの範囲内であることを確認(横)
+    if(x<LP3_maxXY){
+    }
+    else { // ボックスの右側[>] が押されている。
+
+    }
+
+};
+
+// 入力：LaunchPad
+static auto inputLaunchPad = [&](MidiPacket packet){
+
+    // LaunchPad制御制限されている場合、onイベントは無視する。
+    // ※押しながら切り替えられる可能性があるため、offイベントは受ける
+    if(!lpEnable && 0 < packet.getControlValue())
+    {   return; }
+
+    // LaunchPadからの入力
+    // 押された場所の取得
+    static uint8_t x;
+    static uint8_t y;
+    if(Lp3::getLocation(packet,&x,&y)){
+        // 最上段のボタンクリック
+        reDrow();
+    }else {
+        // そのほかのボタン
+        pushButtun(x,y,packet.getControlValue());
+    };
+
+
+};
+
+/*********************************************
+* 割り込みイベント
+**********************************************/
+// LaunchPadの初期表示
+static auto initEvent = Midiglue::make_oneshot_us_event<>(initDrow);
+
+/*********************************************
+* 実行処理
+**********************************************/
+
+// バッファクリア
+mpDispLp3->clear();
+
+// セットアップ
+if (@setup){
+    // 3秒後に初期表示処理を呼び出す
+    initEvent->schedule(3000 * 1000);
+}
+else if (@in0){ // Enable
+    if (in0 == 0) {
+        lpEnable = false;
+    } else {
+        lpEnable = true;
+        reDrow();
+    }
+}
+else if (@in1) { // LaunchPadからの入力
+    inputLaunchPad(in1);
+}
+
+// バッファがあればlaunchpadに送信
+if(0<mpDispLp3->size()){
+    outLaunchPad();
+}
