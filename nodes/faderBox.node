@@ -10,6 +10,7 @@ kokou ni-sui@sabaco
 <I/O>
 input Int : LaunchPad制御（0=Disable）
 input MidiPacket : launchpadからの入力
+input Int : barGageBoxからの入力
 output IntList : 描画情報。lpControlへの接続します。
 
 
@@ -93,6 +94,10 @@ static const uint8_t TBL_VALUE[]={
 // 長押し判定する拍数
 static const uint8_t LONG_PRESS 16;
 
+// ステータス
+static const ST_IDLE    = 0;    // アイドル
+static const ST_MOVING  = 1;    // 移動中
+
 // フェーダー設定
 struct FaderSetting{
     uint8_t ch;         // channel
@@ -104,7 +109,7 @@ struct FaderSetting{
 struct FaderParam{
     uint8_t value;      // 現在の値
     uint8_t valueGaul;  // fader移動のGaul
-    uint8_t startTime;  // fader開始時の位置
+    uint8_t startBarLine;  // fader開始時の位置
 }
 
 
@@ -115,6 +120,9 @@ struct FaderParam{
 static IntList mpDispLp3 = Midiglue::init_default<IntList>();
 // LaunchPad入出力許可フラグ
 static bool lpEnable = true;
+
+// 残りのStep数
+static uint8_t mLeftBarLine = 0;
 
 // Fader設定
 static FaderSetting mFaderSetting[] = {
@@ -148,6 +156,21 @@ static FaderParam mFaderParam[8] = {
 /***********************************************************************
  * 共通処理
  ***********************************************************************/
+
+/*****************
+ * フェーダーのステータスを取得する。
+ * @param param フェーダーのパラメータ構造体
+ * @return ステータス
+ */
+static auto getStatus = [&](FaderParam* param) -> uint8_t {
+    // startBarLineが設定されている場合はフェーダー移動中
+    if(param->startBarLine == 0){
+        return(ST_MOVING);
+    }
+    return(ST_MOVING);
+};
+
+
 /*****************
  * Launch pad への送信
  * @param data  出力したい描画情報
@@ -167,10 +190,10 @@ static auto outLaunchPad = [&](){
  */
 static auto reDrowFader = [&](uint8_t y){
     // y軸によるデータ取得
-    uint8_t ch = mFaderSetting[y].ch;                 // channel
-    // uint8_t ccNumber = mFaderSetting[y].ccNumber;     // cc number
-    uint8_t color = mFaderSetting[y].color;           // color
-    uint8_t value = mValue[y];                      // value
+    uint8_t ch = mFaderSetting[y].ch;                   // channel
+    // uint8_t ccNumber = mFaderSetting[y].ccNumber;    // cc number
+    uint8_t color = mFaderSetting[y].color;             // color
+    uint8_t value = mFaderParam[y].value;               // value
 
     for(int i=0;i<8;i++){
         // valueに合った箇所まで色を付ける
@@ -200,6 +223,65 @@ static auto initDrow = [&](){
     // 自動送信されないのでLaunchPadへの送信を行う
     outLaunchPad();
 };
+
+/*****************
+ * フェーダー入力（アイドル時）
+ * @param x 押されたボタンのX軸(0～7)
+ * @param value value値
+ */
+static auto pushButtunInIdle = [&](uint8_t x,FaderParam* param,uint8_t value){
+    // アイドル状態でボタンoffは動作不要
+    if(value == 0){
+        return;
+    }
+    // 開始時点の残BarLineを記憶
+    param->startBarLine = mLeftBarLine;
+    // ゴールとして指定しているValueを設定
+    param->valueGaul = TBL_VALUE[x];
+
+};
+
+/*****************
+ * フェーダー入力（フェーダー移動中）
+ * @param x 押されたボタンのX軸(0～8)
+ * @param value value値
+ */
+static auto pushButtunInMove = [&](FaderSetting* setting,FaderParam* param,uint8_t value){
+    // アイドル状態でボタンoffは動作不要
+    if(value == 0){
+        // 一定期間押しっぱなしだったら無効
+        if((param->valueGaul - mLeftBarLine) < LONG_PRESS){
+            // valueをゴールに設定
+            param->value = param->valueGaul;
+            // 移動用のパラメータをリセット
+            param->startBarLine = 0;
+            param->valueGaul = 0;
+            // TODO:CC値を出力
+        }
+    } else {
+        // 移動用のパラメータをリセット(現在位置で止める)
+        param->startBarLine = 0;
+        param->valueGaul = 0;
+
+    }
+};
+
+/*****************
+ * フェーダー操作
+ * @param x 押されたボタンのX軸(0～8)
+ * @param y 押されたボタンのy軸(0～8)
+ * @param value value値
+ */
+static auto pushButtunFader = [&](uint8_t x,uint8_t y,uint8_t value){
+    for(int y=0;y<BOXSIZE_Y;y++){
+        if(getStatus(mFaderParam[y]) == ST_IDLE){
+            pushButtunInIdle(x,&mFaderParam[y],value);
+        } else {
+            pushButtunInMove(&mFaderSetting[y],&mFaderParam[y],value);
+        }
+    }
+}
+
 
 /*****************
  * LaunchPadからの入力
@@ -276,6 +358,9 @@ else if (@in0){ // Enable
 }
 else if (@in1) { // LaunchPadからの入力
     inputLaunchPad(in1);
+}
+else if (@in2) { // varGageBoxからの入力
+    mLeftBarLine = in2;    
 }
 
 // バッファがあればlaunchpadに送信
