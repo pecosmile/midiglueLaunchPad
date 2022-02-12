@@ -11,13 +11,19 @@ kokou ni-sui@sabaco
 input Int : LaunchPad制御（0=Disable）
 input MidiPacket : launchpadからの入力
 input Int : barGageBoxからの入力
+output MidiPacket : 出力1
+output MidiPacket : 出力2
 output IntList : 描画情報。lpControlへの接続します。
 
 
 <Description>
-lpControlを使うNodeのテンプレート
-押した部分の色が変わります。
-最上位のボタンを押すとクリア。
+CCを出力するフェーダです。
+settingは出力先,ch,ccNumber,colorをカンマ区切りで設定出来ます。
+なんかコンパイルエラーが出たら、この値が間違ってると思って下さい。
+
+colerに設定できる色は以下
+RED,YELLOW,YGREEN,GREEN,LBLUE,BLUE,BPURPLE,PURPLE,ORANGE,PINK
+
 
 ※ノード単体では動きません。main_template.cppに、専用の定数・クラスを設定する必要があります。
 
@@ -25,15 +31,14 @@ lpControlを使うNodeのテンプレート
 <Parameter>
 parameter Locate = 0 : 描画位置(0-6)
 parameter Height = 4 : 描画範囲(1-8)
-
-parameter Setting1 = "1,0,YELLOW" : (1)ch,ccNumber,Color
-parameter Setting2 = "2,0,YELLOW" : (2)ch,ccNumber,Color
-parameter Setting3 = "3,0,YELLOW" : (3)ch,ccNumber,Color
-parameter Setting4 = "4,0,YELLOW" : (4)ch,ccNumber,Color
-parameter Setting5 = "5,0,YELLOW" : (5)ch,ccNumber,Color
-parameter Setting6 = "6,0,YELLOW" : (6)ch,ccNumber,Color
-parameter Setting7 = "7,0,YELLOW" : (7)ch,ccNumber,Color
-parameter Setting8 = "8,0,YELLOW" : (8)ch,ccNumber,Color
+parameter Setting1 = "1,1,0,YELLOW" : (1)out,ch,ccNumber,Color
+parameter Setting2 = "1,2,0,YELLOW" : (2)out,ch,ccNumber,Color
+parameter Setting3 = "1,3,0,YELLOW" : (3)out,ch,ccNumber,Color
+parameter Setting4 = "1,4,0,YELLOW" : (4)out,ch,ccNumber,Color
+parameter Setting5 = "1,5,0,YELLOW" : (5)out,ch,ccNumber,Color
+parameter Setting6 = "1,6,0,YELLOW" : (6)out,ch,ccNumber,Color
+parameter Setting7 = "1,7,0,YELLOW" : (7)out,ch,ccNumber,Color
+parameter Setting8 = "1,8,0,YELLOW" : (8)out,ch,ccNumber,Color
 
 
 <Setup>
@@ -45,10 +50,9 @@ ${this}( &(Midiglue::__bang) , Midiglue::SETUP );
 /*********************************************
  * 定数
 **********************************************/
-static const uint8_t LOCATE_Y = ${Locate};  // 基準位置（縦）
-static const uint8_t BOXSIZE_X = 8;         // サイズ（横）
-static const uint8_t BOXSIZE_Y = ${Height}; // サイズ（縦）
-
+static const uint8_t LOCATE_Y = ${Locate};      // 基準位置（縦）
+static const uint8_t BOXSIZE_X = 8;             // サイズ（横）
+static const uint8_t BOXSIZE_Y = ${Height};     // サイズ（縦）
 
 // 色設定
 static const uint8_t RED = LP3C_RED;
@@ -59,13 +63,23 @@ static const uint8_t LBLUE = LP3C_LBLUE;
 static const uint8_t BLUE = LP3C_BLUE;
 static const uint8_t BPURPLE = LP3C_BPURPLE;
 static const uint8_t PURPLE = LP3C_PURPLE;
+static const uint8_t ORANGE = LP3C_ORANGE;
+static const uint8_t PINK = LP3C_PINK;
 
 // 色指定（相対）
 // FADERの額
-static const int CR_LEFT    = -1;   // 左端
-static const int CR_MIDDLE  = +1;   // 0～99
-static const int CR_HIGH    = 0;    // 100～127
-static const int CR_BACK    = +2;   // 100～127
+static const int CR_LEFT    = +0;   // 左端
+static const int CR_MIDDLE  = +0;   // 0～99
+static const int CR_HIGH    = -1;    // 100～127
+static const int CR_BACK    = +2;   // 背景
+
+// 長押し判定する拍数
+static const uint8_t LONG_PRESS = 16;
+
+// ステータス
+static const uint8_t ST_IDLE    = 0;    // アイドル
+static const uint8_t ST_MOVING  = 1;    // 移動中
+
 
 // 色指定
 static const int TBL_COLOR[]={
@@ -91,26 +105,20 @@ static const uint8_t TBL_VALUE[]={
     127,            // CR_HIGH
 };
 
-// 長押し判定する拍数
-static const uint8_t LONG_PRESS 16;
-
-// ステータス
-static const ST_IDLE    = 0;    // アイドル
-static const ST_MOVING  = 1;    // 移動中
-
 // フェーダー設定
 struct FaderSetting{
+    uint8_t out;        // channel
     uint8_t ch;         // channel
     uint8_t ccNumber;   // cc number
     uint8_t color;      // color       
-}
+};
 
 // フェーダー状態
 struct FaderParam{
-    uint8_t value;      // 現在の値
-    uint8_t valueGaul;  // fader移動のGaul
-    uint8_t startBarLine;  // fader開始時の位置
-}
+    uint8_t value;          // 現在の値
+    uint8_t valueGaul;      // fader移動のGaul
+    uint8_t startBarLine;   // fader開始時の位置
+};
 
 
 /*********************************************
@@ -148,8 +156,6 @@ static FaderParam mFaderParam[8] = {
     {100,100,0},    // fader 8
 };
 
-
-
 /*********************************************
  * 関数
 **********************************************/
@@ -165,7 +171,7 @@ static FaderParam mFaderParam[8] = {
 static auto getStatus = [&](FaderParam* param) -> uint8_t {
     // startBarLineが設定されている場合はフェーダー移動中
     if(param->startBarLine == 0){
-        return(ST_MOVING);
+        return(ST_IDLE);
     }
     return(ST_MOVING);
 };
@@ -180,37 +186,79 @@ static auto outLaunchPad = [&](){
     if(lpEnable)
     {
         // 出力
-        out0 = mpDispLp3;
+        out2 = mpDispLp3;
     }
 };
 
+
 /*****************
- * フェーダーのreDrow
- * @param y Y軸（相対位置）
+ * フェーダーのreDrow(value指定)
+ * @param faderNo フェーダー番号(0～8)
+ * @param value指定あり
  */
-static auto reDrowFader = [&](uint8_t y){
+static auto reDrowFaderValue = [&](uint8_t faderNo,uint8_t value){
     // y軸によるデータ取得
-    uint8_t ch = mFaderSetting[y].ch;                   // channel
-    // uint8_t ccNumber = mFaderSetting[y].ccNumber;    // cc number
-    uint8_t color = mFaderSetting[y].color;             // color
-    uint8_t value = mFaderParam[y].value;               // value
+    uint8_t ch = mFaderSetting[faderNo].ch;                   // channel
+    // uint8_t ccNumber = mFaderSetting[faderNo].ccNumber;    // cc number
+    uint8_t color = mFaderSetting[faderNo].color;             // color
 
     for(int i=0;i<8;i++){
         // valueに合った箇所まで色を付ける
-        int add = (TBL_VALUE[i] <= value) ? CR_BACK:TBL_COLOR[i];
-        Lp3::addDot(mpDispLp3,mode,1+i,LOCATE_Y + y,color+add);
+        int add = (TBL_VALUE[i] <= value) ? TBL_COLOR[i]:CR_BACK;
+        Lp3::addDot(mpDispLp3,LP3B_NOMAL,i,LOCATE_Y + faderNo,color+add);
     }
 
 };
+
+/*****************
+ * フェーダーのreDrow(value指定なし)
+ * @param faderNo フェーダー番号(0～8)
+ */
+static auto reDrowFader = [&](uint8_t faderNo){
+
+    reDrowFaderValue(faderNo,mFaderParam[faderNo].value);
+
+};
+
+/*****************
+ * Midiへの送信
+ * @param 
+ * @param y 押されたボタンのy軸(0～1)
+ */
+static auto outMidi = [&](uint8_t faderNo,uint8_t value){
+    // パケット作成
+    MidiPacket pacekt = MidiPacket::makeControlChange(
+        mFaderSetting[faderNo].ch,(Midiglue::MIDICCType) mFaderSetting[faderNo].ccNumber,value);
+
+    Midiglue::Debug::write_log("ch", mFaderSetting[faderNo].ch);
+    Midiglue::Debug::write_log("ccNumber", mFaderSetting[faderNo].ccNumber);
+
+
+    //出力先によって値を変える
+    if(mFaderSetting[faderNo].out == 1){
+        Midiglue::Debug::write_log("out0", value);
+        out0 = pacekt;
+    } else if(mFaderSetting[faderNo].out == 2) {
+        Midiglue::Debug::write_log("out1", value);
+        out1 = pacekt;
+    }
+
+    // 描画
+    reDrowFaderValue(faderNo,value);
+
+};
+
+
+
 
 /*****************
  * 表示のreDrow
  */
 static auto reDrow = [&](){
     for(int y=0;y<BOXSIZE_Y;y++){
-        reDrowFader(y);
+        reDrowFader(y);        
     }
-k};
+};
 
 /***********************************************************************
 * 初期化処理
@@ -227,36 +275,54 @@ static auto initDrow = [&](){
 /*****************
  * フェーダー入力（アイドル時）
  * @param x 押されたボタンのX軸(0～7)
+ * @param faderNo フェーダー番号(0～8)
  * @param value value値
  */
-static auto pushButtunInIdle = [&](uint8_t x,FaderParam* param,uint8_t value){
+static auto pushButtunInIdle = [&](uint8_t x,uint8_t faderNo,uint8_t value){
+    // Midiglue::Debug::write_log("pushButtunInIdle", value);
+
     // アイドル状態でボタンoffは動作不要
     if(value == 0){
         return;
     }
+
+    // (例外)BarGageBoxの値 = 0 の場合直接値を変更する
+    if(mLeftBarLine == 0){
+        mFaderParam[faderNo].startBarLine = 0;
+        mFaderParam[faderNo].value = TBL_VALUE[x];
+        outMidi(faderNo,mFaderParam[faderNo].value);
+        return;
+    }
+
     // 開始時点の残BarLineを記憶
-    param->startBarLine = mLeftBarLine;
+    mFaderParam[faderNo].startBarLine = mLeftBarLine;
     // ゴールとして指定しているValueを設定
-    param->valueGaul = TBL_VALUE[x];
+    mFaderParam[faderNo].valueGaul = TBL_VALUE[x];
 
 };
 
 /*****************
  * フェーダー入力（フェーダー移動中）
  * @param x 押されたボタンのX軸(0～8)
+ * @param faderNo フェーダー番号(0～8)
  * @param value value値
  */
-static auto pushButtunInMove = [&](FaderSetting* setting,FaderParam* param,uint8_t value){
+static auto pushButtunInMove = [&](uint8_t faderNo,uint8_t value){
+    // Midiglue::Debug::write_log("pushButtunInMove", value);
+
+    FaderSetting* setting = &mFaderSetting[faderNo];
+    FaderParam* param = &mFaderParam[faderNo];
     // アイドル状態でボタンoffは動作不要
     if(value == 0){
         // 一定期間押しっぱなしだったら無効
-        if((param->valueGaul - mLeftBarLine) < LONG_PRESS){
+        if((param->startBarLine - mLeftBarLine) < LONG_PRESS){
             // valueをゴールに設定
             param->value = param->valueGaul;
             // 移動用のパラメータをリセット
             param->startBarLine = 0;
             param->valueGaul = 0;
-            // TODO:CC値を出力
+            // CC値を出力
+            outMidi(faderNo,param->value);
         }
     } else {
         // 移動用のパラメータをリセット(現在位置で止める)
@@ -269,19 +335,16 @@ static auto pushButtunInMove = [&](FaderSetting* setting,FaderParam* param,uint8
 /*****************
  * フェーダー操作
  * @param x 押されたボタンのX軸(0～8)
- * @param y 押されたボタンのy軸(0～8)
+ * @param faderNo フェーダー番号(0～8)
  * @param value value値
  */
-static auto pushButtunFader = [&](uint8_t x,uint8_t y,uint8_t value){
-    for(int y=0;y<BOXSIZE_Y;y++){
-        if(getStatus(mFaderParam[y]) == ST_IDLE){
-            pushButtunInIdle(x,&mFaderParam[y],value);
-        } else {
-            pushButtunInMove(&mFaderSetting[y],&mFaderParam[y],value);
-        }
+static auto pushButtunFader = [&](uint8_t x,uint8_t faderNo,uint8_t value){
+    if(getStatus(&mFaderParam[faderNo]) == ST_IDLE){
+        pushButtunInIdle(x,faderNo,value);
+    } else {
+        pushButtunInMove(faderNo,value);
     }
-}
-
+};
 
 /*****************
  * LaunchPadからの入力
@@ -293,13 +356,14 @@ static auto pushButtun = [&](uint8_t x,uint8_t y,uint8_t value){
     // Midiglue::Debug::write_log("inputProgramChange", x*10+y);
     // boxの範囲内であることを確認(縦)
     if(y < LOCATE_Y || y >= (LOCATE_Y + BOXSIZE_Y)){
-        return;
+       return;
     }
     // // y軸補正
     y -= LOCATE_Y;
 
     // boxの範囲内であることを確認(横)
     if(x<LP3_maxXY){
+        pushButtunFader(x,y,value);
     }
     else { // ボックスの右側[>] が押されている。
 

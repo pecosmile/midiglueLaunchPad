@@ -105,16 +105,6 @@ static bool mPushCMClear = false;
 // 2段目のキーボード有無（将来動的にする可能性があるため変数にする）
 static bool mSecondKey = ${DoubleKey};
 
-
-/**********************
- * マクロ
- **********************/
-
-// BOXの高さ（２段目のキーボードの有無で決まる）
-#define BOXSIZE_Y ( mSecondKey ? 5 :3 )
-
-
-
 /*********************************************
  * 関数
 **********************************************/
@@ -603,8 +593,11 @@ static auto pushFunc = [&](uint8_t y,uint8_t value){
  */
 static auto pushButtun = [&](uint8_t x,uint8_t y,uint8_t value){
 
+    // キーボードの数によって高さが変わる
+    uint8_t height = ( mSecondKey ? 5 :3 );
+
     // boxの範囲内であることを確認(縦)
-    if(y < LOCATE_Y || y >= (LOCATE_Y + BOXSIZE_Y)){
+    if(y < LOCATE_Y || y >= (LOCATE_Y + height)){
         return;
     }
 

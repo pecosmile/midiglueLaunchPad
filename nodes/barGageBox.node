@@ -168,11 +168,13 @@ static auto inputClock = [&](MidiPacket packet){
     // init bung
     if(packet == CLOCK && 0 < (mStatus&ST_PLAING) ){
         // clock信号
-        clockCount = (++clockCount)%CLOCK4STEP;
+        ++clockCount;
+        clockCount %= CLOCK4STEP;
         // CLOCK4STEP毎に１ブロック進む
         if(0 == clockCount){
             // 小節カウント
-            barCount = (++barCount)%barLength;
+            ++barCount;
+            barCount %= barLength;
             if(barCount == 0) {
                 reDrow(); // 再描画
             } else {
