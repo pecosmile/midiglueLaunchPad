@@ -94,7 +94,7 @@ static const int TBL_COLOR[]={
 };
 
 // fader value
-static const uint8_t TBL_VALUE[]={
+static const std::vector<uint8_t> TBL_VALUE{
     0,              // CR_LEFT
     20,             // CR_MIDDLE
     40,             // CR_MIDDLE
@@ -117,7 +117,8 @@ struct FaderSetting{
 struct FaderParam{
     uint8_t value;          // 現在の値
     uint8_t valueGaul;      // fader移動のGaul
-    uint8_t startBarLine;   // fader開始時の位置
+    Int startBarLine;       // fader開始時の位置
+    uint8_t startValue;     // fader開始時の位置
 };
 
 
@@ -130,7 +131,7 @@ static IntList mpDispLp3 = Midiglue::init_default<IntList>();
 static bool lpEnable = true;
 
 // 残りのStep数
-static uint8_t mLeftBarLine = 0;
+static Int mLeftBarLine = 0;
 
 // Fader設定
 static FaderSetting mFaderSetting[] = {
@@ -192,11 +193,10 @@ static auto outLaunchPad = [&](){
 
 
 /*****************
- * フェーダーのreDrow(value指定)
+ * フェーダーのreDrow(value指定なし)
  * @param faderNo フェーダー番号(0～8)
- * @param value指定あり
  */
-static auto reDrowFaderValue = [&](uint8_t faderNo,uint8_t value){
+static auto reDrowFader = [&](uint8_t faderNo){
     // y軸によるデータ取得
     uint8_t ch = mFaderSetting[faderNo].ch;                   // channel
     // uint8_t ccNumber = mFaderSetting[faderNo].ccNumber;    // cc number
@@ -204,20 +204,9 @@ static auto reDrowFaderValue = [&](uint8_t faderNo,uint8_t value){
 
     for(int i=0;i<8;i++){
         // valueに合った箇所まで色を付ける
-        int add = (TBL_VALUE[i] <= value) ? TBL_COLOR[i]:CR_BACK;
+        int add = (TBL_VALUE[i] <= mFaderParam[faderNo].value) ? TBL_COLOR[i]:CR_BACK;
         Lp3::addDot(mpDispLp3,LP3B_NOMAL,i,LOCATE_Y + faderNo,color+add);
     }
-
-};
-
-/*****************
- * フェーダーのreDrow(value指定なし)
- * @param faderNo フェーダー番号(0～8)
- */
-static auto reDrowFader = [&](uint8_t faderNo){
-
-    reDrowFaderValue(faderNo,mFaderParam[faderNo].value);
-
 };
 
 /*****************
@@ -230,26 +219,13 @@ static auto outMidi = [&](uint8_t faderNo,uint8_t value){
     MidiPacket pacekt = MidiPacket::makeControlChange(
         mFaderSetting[faderNo].ch,(Midiglue::MIDICCType) mFaderSetting[faderNo].ccNumber,value);
 
-    Midiglue::Debug::write_log("ch", mFaderSetting[faderNo].ch);
-    Midiglue::Debug::write_log("ccNumber", mFaderSetting[faderNo].ccNumber);
-
-
     //出力先によって値を変える
     if(mFaderSetting[faderNo].out == 1){
-        Midiglue::Debug::write_log("out0", value);
         out0 = pacekt;
     } else if(mFaderSetting[faderNo].out == 2) {
-        Midiglue::Debug::write_log("out1", value);
         out1 = pacekt;
     }
-
-    // 描画
-    reDrowFaderValue(faderNo,value);
-
 };
-
-
-
 
 /*****************
  * 表示のreDrow
@@ -272,6 +248,26 @@ static auto initDrow = [&](){
     outLaunchPad();
 };
 
+/***********************************************************************
+ * 初期化処理入力
+ ***********************************************************************/
+/*****************
+ * フェーダーの状態リセット（IDLEにする）
+ * @param x 押されたボタンのX軸(0～7)
+ * @param faderNo フェーダー番号(0～8)
+ * @param value value値
+ */
+static auto resetFaderParam = [&](uint8_t faderNo){
+    // 移動用のパラメータをリセット
+    mFaderParam[faderNo].startBarLine = 0;
+    mFaderParam[faderNo].valueGaul = 0;
+    mFaderParam[faderNo].startValue = 0;
+    // Midiglue::Debug::write_log("resetFaderParam:", mFaderParam[faderNo].value);
+
+};
+
+
+
 /*****************
  * フェーダー入力（アイドル時）
  * @param x 押されたボタンのX軸(0～7)
@@ -288,16 +284,24 @@ static auto pushButtunInIdle = [&](uint8_t x,uint8_t faderNo,uint8_t value){
 
     // (例外)BarGageBoxの値 = 0 の場合直接値を変更する
     if(mLeftBarLine == 0){
-        mFaderParam[faderNo].startBarLine = 0;
         mFaderParam[faderNo].value = TBL_VALUE[x];
+        resetFaderParam(faderNo);
         outMidi(faderNo,mFaderParam[faderNo].value);
+        // 描画
+        reDrowFader(faderNo);
         return;
     }
 
-    // 開始時点の残BarLineを記憶
+    // 開始時点の残BarLine,valueを記憶
     mFaderParam[faderNo].startBarLine = mLeftBarLine;
+    mFaderParam[faderNo].startValue = mFaderParam[faderNo].value;
     // ゴールとして指定しているValueを設定
     mFaderParam[faderNo].valueGaul = TBL_VALUE[x];
+
+    // Midiglue::Debug::write_log("startBarLine:", mFaderParam[faderNo].startBarLine);
+    // Midiglue::Debug::write_log("startValue:", mFaderParam[faderNo].startValue);
+    // Midiglue::Debug::write_log("valueGaul:", mFaderParam[faderNo].valueGaul);
+
 
 };
 
@@ -319,10 +323,11 @@ static auto pushButtunInMove = [&](uint8_t faderNo,uint8_t value){
             // valueをゴールに設定
             param->value = param->valueGaul;
             // 移動用のパラメータをリセット
-            param->startBarLine = 0;
-            param->valueGaul = 0;
+            resetFaderParam(faderNo);
             // CC値を出力
             outMidi(faderNo,param->value);
+            // 描画
+            reDrowFader(faderNo);
         }
     } else {
         // 移動用のパラメータをリセット(現在位置で止める)
@@ -394,6 +399,80 @@ static auto inputLaunchPad = [&](MidiPacket packet){
 
 };
 
+
+/*****************
+ * 小節位置の計算
+ */
+static auto getTblValuePosition = [&](uint8_t value) -> uint8_t {
+    uint8_t ret = *(TBL_VALUE.begin()); 
+    for(auto itr=TBL_VALUE.begin();itr!=TBL_VALUE.end();itr++++) {
+        if(*itr > value){
+            break;
+        }
+        ret = *itr;
+    }
+    return(ret);
+};
+
+/*****************
+ * 小節位置の計算
+ */
+static auto barLineCalc = [&](int gapValue,Int a,Int b) -> int {
+    return(gapValue * ((float)(b - a) / b));
+};
+
+/*****************
+ * フェーダー移動処理
+ */
+static auto faderMoveOne = [&](uint8_t faderNo){
+
+    // パラメータ
+    FaderParam* param = &mFaderParam[faderNo];
+
+    // 移動状態でない場合は処理不要
+    if(ST_MOVING != getStatus(param)){
+        return;
+    }
+
+    // 計算値取得
+    int newValue = param->startValue + 
+        barLineCalc(param->valueGaul - param->startValue,mLeftBarLine,param->startBarLine);
+
+    // 値に変化がある場合のみMidiを送信する
+    if(newValue != param->value){
+        // Midiglue::Debug::write_log("midiOut", newValue);
+        outMidi(faderNo,newValue);
+        // 表示に影響がある場合は、再描画を行う。
+        if(getTblValuePosition(newValue) != getTblValuePosition(param->value)){
+            // 変更後の値を記憶
+            param->value = newValue;
+            //
+            reDrowFader(faderNo);
+        }
+        // 変更後の値を記憶
+        param->value = newValue;
+    }
+
+    // 
+    // フェーダー移動を完了。
+    if(mLeftBarLine <= 0){
+        Midiglue::Debug::write_log("**FaderEnd:", mFaderParam[faderNo].value);
+        resetFaderParam(faderNo);
+    }
+
+
+};
+
+/*****************
+ * フェーダー移動処理
+ */
+static auto faderMove = [&](){
+    for(int y=0;y<BOXSIZE_Y;y++){
+        faderMoveOne(y);        
+    }
+};
+
+
 /*********************************************
 * 割り込みイベント
 **********************************************/
@@ -424,7 +503,14 @@ else if (@in1) { // LaunchPadからの入力
     inputLaunchPad(in1);
 }
 else if (@in2) { // varGageBoxからの入力
-    mLeftBarLine = in2;    
+    mLeftBarLine = in2;
+
+    if(0 == mLeftBarLine%20){
+        Midiglue::Debug::write_log("mLeftBarLine1", in2);
+        Midiglue::Debug::write_log("mLeftBarLine2", mLeftBarLine);
+    }
+
+    faderMove();
 }
 
 // バッファがあればlaunchpadに送信

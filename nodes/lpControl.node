@@ -20,16 +20,6 @@ LaunchPad描画のSysExを出力します。
 起動直後にLaunchPadをProgrammer modeに設定します。
 LaunchPad接続後にプログラムを起動する必要があります。
 
-詳しくは「Launchpad mini mk3 Programmer’s reference manual」を参照してください。
-
-描画バッファには、３バイト単位で[光点モード][光らせる位置][色]を送ります。
-ノードはこの情報をバッファリング。 Intervalで設定した間隔で、描画処理します。
-このため「Inputに情報を送った直後に描画する」訳ではないことに留意してください。
-最大Intervalでした時間だけディレイします。
-
-※ノード単体では動きません。main_template.cppに、専用の定数・クラスを設定する必要があります。
-
-
 <Parameter>
 parameter Interval = 30 : 描画する間隔（msec）小さいと、うまく動きません
 parameter max_put = 32 : 一度に描画する最大ドット36以上はうまく動きません。
