@@ -178,6 +178,8 @@ mpDispLp3->clear();
 if (@setup){
     // 3秒後に初期表示処理を呼び出す
     initEvent->schedule(3000 * 1000);
+    // 初期値を送る
+    inputLaunchPad(0);
 }
 else if (@in0) { // LaunchPadからの入力
     inputLaunchPad(in0.getControlNumber());

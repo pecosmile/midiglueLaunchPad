@@ -456,7 +456,7 @@ static auto faderMoveOne = [&](uint8_t faderNo){
     // 
     // フェーダー移動を完了。
     if(mLeftBarLine <= 0){
-        Midiglue::Debug::write_log("**FaderEnd:", mFaderParam[faderNo].value);
+        // Midiglue::Debug::write_log("**FaderEnd:", mFaderParam[faderNo].value);
         resetFaderParam(faderNo);
     }
 
@@ -505,10 +505,10 @@ else if (@in1) { // LaunchPadからの入力
 else if (@in2) { // varGageBoxからの入力
     mLeftBarLine = in2;
 
-    if(0 == mLeftBarLine%20){
-        Midiglue::Debug::write_log("mLeftBarLine1", in2);
-        Midiglue::Debug::write_log("mLeftBarLine2", mLeftBarLine);
-    }
+    // if(0 == mLeftBarLine%20){
+    //     Midiglue::Debug::write_log("mLeftBarLine1", in2);
+    //     Midiglue::Debug::write_log("mLeftBarLine2", mLeftBarLine);
+    // }
 
     faderMove();
 }

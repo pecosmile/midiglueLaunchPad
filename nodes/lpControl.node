@@ -32,26 +32,139 @@ ${this}( &(Midiglue::__bang) , Midiglue::SETUP );
 
 
 /*********************************************
+ * 構造体
+**********************************************/
+// launchpad 明滅セッティング
+struct Lp3LightSetting{
+    uint8_t mode;       // 明滅モード
+    uint8_t locate;     // 位置値
+    uint8_t color;      // 色
+};
+
+/*********************************************
  * 定数
 **********************************************/
 /** Launch Pad mini 3 初期化用のバイナリ */
 static const uint8_t LP3_INIT_SYSEX[] = { 0xF0,0x00,0x20,0x29,0x02,0x0D,0x00,0x7F,0xF7,};
 static const uint32_t LP3_INIT_SYSEX_SIZE = 9u;
 /** sysEx ヘッダ */
-static const std::vector<uint8_t> LP3_exh = { 0xf0,0x00,0x20,0x29,0x02,0x0d,0x03,};
+// static const std::vector<uint8_t> LP3_exh = { 0xf0,0x00,0x20,0x29,0x02,0x0d,0x03,};
+static const uint8_t LP3_exh[] = { 0xf0,0x00,0x20,0x29,0x02,0x0d,0x03,};
+static const uint8_t LP3_exh_length = 7;
 /** sysEx フッター */
-static const uint8_t LP3_exf = 0x7f;
+static const uint8_t LP3_exf[] = { 0x7f };
+static const uint8_t LP3_exf_length = 1;
+
+// 送信バッファのサイズ
+static const uint16_t LP3_BUFF_MAX = ${max_put}*3 + LP3_exh_length + LP3_exf_length;
 
 /** 描画情報を保持するバッファ */
 static IntList pLpDots = Midiglue::init_default<IntList>();
+
+static const uint8_t MAX_RING_BUFFER= 128;     // バッファサイズ
+static Lp3LightSetting mLp3LingBuff[MAX_RING_BUFFER];   // バッファ
+static uint8_t mLbWrite = 0;    // 書き込み位置
+static uint8_t mLbRead = 0;     // 読み込み位置
+
 /** 送信バッファ */
-static std::vector<uint8_t> mLp3Buff;
+//static std::vector<uint8_t> mLp3Buff;
+static uint8_t mLp3Buff[LP3_BUFF_MAX];
+static uint32_t mLp3BuffCount = 0;
+
+
 /** SysEx送信用 */
 static MidiSysEx sysex{0u, nullptr};
 
 /*********************************************
  * 関数
 **********************************************/
+/*****************
+ * 送信バッファにコピー
+ */
+static auto setSendBuff = [&](const uint8_t* pBuff,const uint16_t size){
+    // 最大値を超えては送信できないです。
+    if(mLp3BuffCount + size > LP3_BUFF_MAX){
+        Midiglue::Debug::write_log("!!setSendBuff:BO!!:",mLp3BuffCount + size);
+        mLp3BuffCount = 0;
+        return;
+    }
+    // バッファコピー
+    memcpy(&(mLp3Buff[mLp3BuffCount]),pBuff,size);
+
+    // カウンタ
+    mLp3BuffCount += size;
+};
+
+
+/*****************
+ * リングバッファが空
+ */
+static auto lbIsEmpty = [&]() -> bool{
+    return(mLbWrite == mLbRead);
+};
+
+/*****************
+ * リングバッファが一杯
+ */
+static auto lbIsFull = [&]() -> bool{
+    return((mLbWrite+1)%MAX_RING_BUFFER == mLbRead);
+};
+
+/*****************
+ * リングバッファ追加
+ */
+static auto lbAddData = [&](uint8_t mode,uint8_t locate,uint8_t color){
+    // 既にリングバッファが一杯
+    if(lbIsFull()){
+        Midiglue::Debug::write_log("!!lbAddData:BO!!:",mLbWrite);
+        Midiglue::Debug::write_log(" :",mLbRead);
+        return;
+    }
+    // 一杯で無いなら追加可能
+    mLp3LingBuff[mLbWrite].mode = mode;
+    mLp3LingBuff[mLbWrite].locate = locate;
+    mLp3LingBuff[mLbWrite].color = color;
+    // ポインタを進める
+    mLbWrite = (mLbWrite+1)%MAX_RING_BUFFER;
+};
+
+/*****************
+ * リングバッファから値を送信
+ */
+static auto drowLaunchPad = [&](){
+
+    // リングバッファが空
+    if(lbIsEmpty()){
+        return;
+    }
+
+    mLp3BuffCount = 0;
+    setSendBuff(LP3_exh,LP3_exh_length);
+
+    // pLpDotsに持っているバッファを３つ単位で送信する
+    int count = ${max_put};
+    uint8_t buff[3];
+    while(!lbIsEmpty() && count > 0) {
+        // 送信バッファを設定
+        buff[0] = mLp3LingBuff[mLbRead].mode;
+        buff[1] = mLp3LingBuff[mLbRead].locate;
+        buff[2] = mLp3LingBuff[mLbRead].color;
+        setSendBuff(buff,3);
+        // ポインタを進める
+        mLbRead = (mLbRead+1)%MAX_RING_BUFFER;
+        count--;
+    }
+    setSendBuff(LP3_exf,LP3_exf_length);
+
+    // SysExとして送信
+    sysex.len = mLp3BuffCount;
+    sysex.buf = mLp3Buff;
+
+    out0 = sysex;
+};
+
+
+
 /*****************
  * LaunchPad初期化
  * LaunchPad mini mk3 をプログラマモードに
@@ -64,41 +177,6 @@ static auto initLaunchPad = [&](){
     sysex.buf = LP3_INIT_SYSEX;
 
     out0 = sysex;
-};
-
-// LaunchPadへの描画データ送信（単位時間ごとのSysEx吐き出し）
-static auto drowLaunchPad = [&](){
-    // データがなければ処理しない
-    if(pLpDots->size() < 3) {
-        return;
-    }
-    // バッファクリア
-    mLp3Buff.clear();
-    // hederの値をセット
-    for(auto itr = LP3_exh.begin(); itr != LP3_exh.end(); ++itr) {
-        mLp3Buff.push_back(*itr);
-    }
-    // pLpDotsに持っているバッファを３つ単位で送信する
-    int count = ${max_put};
-    while(pLpDots->size()>=3 && count > 0) {
-        // TODO:elete()遅いという指摘あり。可能であればリングバッファを準備。
-        mLp3Buff.push_back(*(pLpDots->begin()));
-        pLpDots->erase(pLpDots->begin());
-        mLp3Buff.push_back(*(pLpDots->begin()));
-        pLpDots->erase(pLpDots->begin());
-        mLp3Buff.push_back(*(pLpDots->begin()));
-        pLpDots->erase(pLpDots->begin());
-        count--;
-    }
-    // フッタ
-    mLp3Buff.push_back(LP3_exf);
-
-    // SysExとして送信
-    sysex.len = mLp3Buff.size();
-    sysex.buf = mLp3Buff.data();
-
-    out0 = sysex;
-
 };
 
 /*********************************************
@@ -119,8 +197,8 @@ if (@setup){
 else if (@in0){
     // 受信したバッファを一時保存
     // TODO:たぶんvectorの結合あるんじゃないかな。
-    for(auto itr = in0->begin(); itr != in0->end(); ++itr) {
-        pLpDots->push_back(*itr);
+    for(auto itr = in0->begin(); itr < in0->end(); itr+=3 ) {
+        lbAddData(*itr,*(itr+1),*(itr+2));
     }
 
 }
