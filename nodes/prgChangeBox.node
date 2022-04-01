@@ -45,12 +45,12 @@ static const uint8_t SCROOL_DOWN = LP3K_DOWN;   // スクロール：下
 
 // プログラム識別用の色
 static const uint8_t mColor[8] = {
-    LP3C_D_RED,     // 1:茶色
+    LP3C_I_YGREEN,  // 1:茶色
     LP3C_RED,       // 2:赤
+    LP3C_I_BGREEN,  // 5:緑
     LP3C_L_ORANGE,  // 3:オレンジ
-    LP3C_YELLOW,    // 4:黄色
-    LP3C_GREEN,     // 5:緑
     LP3C_BLUE,      // 6:青
+    LP3C_YELLOW,    // 4:黄色
     LP3C_PURPLE,    // 7:紫
     LP3C_DK_GLAY    // 8:灰色
 };

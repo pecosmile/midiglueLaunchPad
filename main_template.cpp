@@ -57,6 +57,11 @@ static const uint8_t LP3C_RED = 0x05;
 static const uint8_t LP3C_I_RED = 0x06;
 static const uint8_t LP3C_D_RED = 0x07;
 
+static const uint8_t LP3C_L_BROWN = 0x08;
+static const uint8_t LP3C_BROWN = 0x09;
+static const uint8_t LP3C_I_BROWN = 0x0A;
+static const uint8_t LP3C_D_BROWN = 0x0B;
+
 static const uint8_t LP3C_L_YELLOW = 0x0C;
 static const uint8_t LP3C_YELLOW = 0x0D;
 static const uint8_t LP3C_I_YELLOW = 0x0E;
@@ -71,6 +76,16 @@ static const uint8_t LP3C_L_GREEN = 0x14;
 static const uint8_t LP3C_GREEN = 0x15;
 static const uint8_t LP3C_I_GREEN = 0x16;
 static const uint8_t LP3C_D_GREEN = 0x17;
+
+static const uint8_t LP3C_L_BGREEN = 0x18;
+static const uint8_t LP3C_BGREEN = 0x19;
+static const uint8_t LP3C_I_BGREEN = 0x1A;
+static const uint8_t LP3C_D_BGREEN = 0x1B;
+
+static const uint8_t LP3C_L_GBLUE = 0x1C;
+static const uint8_t LP3C_GBLUE = 0x1D;
+static const uint8_t LP3C_I_GBLUE = 0x1E;
+static const uint8_t LP3C_D_GBLUE = 0x1F;
 
 static const uint8_t LP3C_L_LBLUE = 0x24;
 static const uint8_t LP3C_LBLUE = 0x25;
@@ -96,6 +111,11 @@ static const uint8_t LP3C_L_PINK = 0x34;
 static const uint8_t LP3C_PINK = 0x35;
 static const uint8_t LP3C_I_PINK = 0x36;
 static const uint8_t LP3C_D_PINK = 0x37;
+
+static const uint8_t LP3C_L_WRED = 0x38;
+static const uint8_t LP3C_WRED = 0x39;
+static const uint8_t LP3C_I_WRED = 0x3A;
+static const uint8_t LP3C_D_WRED = 0x3B;
 
 static const uint8_t LP3C_ORANGE = 0x3C;
 static const uint8_t LP3C_L_ORANGE = 0x3D;

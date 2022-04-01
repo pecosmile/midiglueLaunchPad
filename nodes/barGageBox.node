@@ -41,8 +41,8 @@ static const auto CONTINUE = MidiPacket::makeTimingClockContinue();
 static const uint8_t CLOCK4STEP = 24*4;
 
 // 1ステップ/クロック
-static const uint8_t COLOR_A = LP3C_PURPLE;
-static const uint8_t COLOR_B = LP3C_L_GREEN;
+static const uint8_t COLOR_A = LP3C_D_GBLUE;
+static const uint8_t COLOR_B = LP3C_L_GBLUE;
 static const uint8_t COLOR_BACK = LP3C_BLACK;
 
 // ステータス

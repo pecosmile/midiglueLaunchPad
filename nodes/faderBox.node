@@ -207,6 +207,9 @@ static auto reDrowFader = [&](uint8_t faderNo){
         int add = (TBL_VALUE[i] <= mFaderParam[faderNo].value) ? TBL_COLOR[i]:CR_BACK;
         Lp3::addDot(mpDispLp3,LP3B_NOMAL,i,LOCATE_Y + faderNo,color+add);
     }
+    // 外側は未使用
+    Lp3::addDot(mpDispLp3,LP3B_NOMAL,8,LOCATE_Y + faderNo,LP3C_BLACK);
+
 };
 
 /*****************
