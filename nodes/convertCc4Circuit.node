@@ -155,41 +155,6 @@ static auto noteFunction = [&](MidiPacket packet){
 
 };
 
-/*********
- * clock処理
- ********/
-static auto clockFunction = [&](Int clock){
-    // mClockCount = clock;
-
-    // // 実行状態でないなら無視（何も送らない
-    // if(mSldCcStatus != SLDRCC_ST_EXECUTE){
-    //     return;
-    // }
-
-    // // 基準値
-    // uint8_t value = mSldCcValue;
-
-    // // clock は、小節開始が最大で、小節終わりに向けてカウントダウンしていく。
-    // // つまり mSldCcValue * (clock/mSldCcStart) は、開始から終わりにむかって減退していく
-    // value *= clock;
-    // value /= mSldCcStart;
-
-    // // upだった場合は状態を反転(終わりに向かって増加していく)
-    // if(mSldCcKind == SLDRCC_Synth1_UP){
-    //     value = mSldCcValue - value;
-    // }
-
-    // // 前回送ったvalueから変化があった場合にのみ送信
-    // if(mSldCcOutValue != value){
-    //     // CC を出力
-    //     out0 = MidiPacket::makeControlChange(${prgTargetCh},mSldCcNumber,value);
-    //     mSldCcOutValue = value;
-    // }
-
-
-};
-
-
 /*********************************************
 * 実行処理
 **********************************************/
