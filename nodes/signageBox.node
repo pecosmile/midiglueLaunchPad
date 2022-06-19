@@ -1,0 +1,27 @@
+<Comment>
+
+
+kokou ni-sui@sabaco
+
+<I/O>
+input Int : LaunchPad制御（0=Disable）
+output IntList : 描画情報。lpControlへの接続します。
+
+
+<Description>
+電光掲示板代わりに使うやつ
+
+※ノード単体では動きません。main_template.cppに、専用の定数・クラスを設定する必要があります。
+
+
+<Parameter>
+
+<Setup>
+
+<Code>
+
+/**********************
+ * 定数
+ **********************/
+
+
