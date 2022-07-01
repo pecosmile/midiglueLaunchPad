@@ -8,6 +8,7 @@ input Int : LaunchPad制御（0=Disable）
 input MidiPacket : clock入力
 input MidiPacket : ボタン入力情報(LaunchPad) 
 input Int : bung(test)
+input Int : step(test)
 output IntList : 描画情報。lpControlへの接続します。
 
 
@@ -35,7 +36,7 @@ static const uint8_t BOXSIZE_X = 8;  // サイズ（横）
 
 // digiland beats
 
-unsigned char SLA[]={
+static unsigned char SLA[]={
     0b01100000,
     0b10010010,
     0b10010010,
@@ -43,7 +44,7 @@ unsigned char SLA[]={
     0b00000000,
 };
 
-unsigned char SLB[]={
+static unsigned char SLB[]={
     0b11111111,
     0b10010000,
     0b10010000,
@@ -51,14 +52,14 @@ unsigned char SLB[]={
     0b00000000,
 };
 
-unsigned char SLD[]={
+static unsigned char SLD[]={
     0b01100000,
     0b10010000,
     0b11111111,
     0b00000000,
 };
 
-unsigned char SLE[]={
+static unsigned char SLE[]={
     0b01111100,
     0b10010010,
     0b10010010,
@@ -66,7 +67,7 @@ unsigned char SLE[]={
     0b00000000,
 };
 
-unsigned char SLG[]={
+static unsigned char SLG[]={
     0b10001110,
     0b10010001,
     0b10010001,
@@ -74,17 +75,17 @@ unsigned char SLG[]={
     0b00000000,
 };
 
-unsigned char SLI[]={
+static unsigned char SLI[]={
     0b11111010,
     0b00000000,
 };
 
-unsigned char SLL[]={
+static unsigned char SLL[]={
     0b11111111,
     0b00000000,
 };
 
-unsigned char SLN[]={
+static unsigned char SLN[]={
     0b11111000,
     0b00001000,
     0b00001000,
@@ -92,14 +93,14 @@ unsigned char SLN[]={
     0b00000000,
 };
 
-unsigned char SLT[]={
+static unsigned char SLT[]={
     0b00001000,
     0b01111111,
     0b10001000,
     0b00000000,
 };
 
-unsigned char SLS[]={
+static unsigned char SLS[]={
     0b11111111,
     0b11111111,
     0b01001100,
@@ -117,9 +118,9 @@ struct ST_CHARACTER{
 
 static ST_CHARACTER mCharactors[] = {
     {   SLA     ,LP3C_L_YELLOW},
-    {   SLA     ,LP3C_L_YELLOW},
-    {   SLA     ,LP3C_L_YELLOW},
-    {   SLA     ,LP3C_L_YELLOW},
+    {   SLB     ,LP3C_L_YELLOW},
+    {   SLD     ,LP3C_L_YELLOW},
+    {   SLE     ,LP3C_L_YELLOW},
     {   NULL    ,0},
 };
 
@@ -204,11 +205,12 @@ static auto getLight = [&](){
 // 既に全ての文字を表示済みの場合は黒を設定
     if(mCharactors[mTextNumber].character != NULL){
         // 対応するテキスト・表示ラインの取得
-        unsigned char* ch = mCharactors[mTextNumber].character;
+         unsigned char* ch = (mCharactors[mTextNumber].character);
         textColor = mCharactors[mTextNumber].color;
         line = ch[mTextClumn];
 
-        Midiglue::Debug::write_log("new Line:", line);
+//         Midiglue::Debug::write_log("mTextNumber:", mTextNumber);
+//         Midiglue::Debug::write_log("mTextClumn", mTextClumn);
 
         // 次のラインを設定
         mTextClumn++;
@@ -220,6 +222,18 @@ static auto getLight = [&](){
     }
 
 
+
+        // line = SLA[mTextClumn];
+        // textColor = LP3C_L_YELLOW;
+        // // 次のラインを設定
+        // mTextClumn++;
+        // if(line == 0b00000000){
+        //     mTextClumn = 0;
+        //     mTextNumber++;
+        // }
+
+
+
     if(line != 0b00000000){
         char tmp[40];
 
@@ -227,10 +241,10 @@ static auto getLight = [&](){
         tmp[0]='*';
         for(int y=0;y<BOXSIZE_Y;y++){
             tmp[y+1] = (0 != (line & mask))?'1':'0';
+            mask >>= 1;
         }
         tmp[BOXSIZE_Y+1]='\0';
         Midiglue::Debug::write_log(tmp, 0);
-        mask >>= 1;
     }
 
 
@@ -383,6 +397,9 @@ else if (@in3){
     mTextNumber = 0;
     // ドット出力位置
     mTextClumn = 0;
+}
+else if (@in4){
+    timerFunction();
 }
 // バッファがあればlaunchpadに送信
 if(0<mpDispLp3->size()){
