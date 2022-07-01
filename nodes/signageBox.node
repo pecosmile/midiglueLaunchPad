@@ -1,10 +1,13 @@
 <Comment>
-
+signageBox
 
 kokou ni-sui@sabaco
 
 <I/O>
 input Int : LaunchPad制御（0=Disable）
+input MidiPacket : clock入力
+input MidiPacket : ボタン入力情報(LaunchPad) 
+input Int : bung(test)
 output IntList : 描画情報。lpControlへの接続します。
 
 
@@ -17,11 +20,371 @@ output IntList : 描画情報。lpControlへの接続します。
 <Parameter>
 
 <Setup>
+// Bung設定
+${this}( &(Midiglue::__bang) , Midiglue::SETUP );
 
 <Code>
 
 /**********************
  * 定数
  **********************/
+static const uint8_t LOCATE_Y = 0;  // 基準位置（縦）
+static const uint8_t BOXSIZE_Y = 8;  // サイズ（縦）
+static const uint8_t BOXSIZE_X = 8;  // サイズ（横）
 
 
+// digiland beats
+
+unsigned char SLA[]={
+    0b01100000,
+    0b10010010,
+    0b10010010,
+    0b11111100,
+    0b00000000,
+};
+
+unsigned char SLB[]={
+    0b11111111,
+    0b10010000,
+    0b10010000,
+    0b01100000,
+    0b00000000,
+};
+
+unsigned char SLD[]={
+    0b01100000,
+    0b10010000,
+    0b11111111,
+    0b00000000,
+};
+
+unsigned char SLE[]={
+    0b01111100,
+    0b10010010,
+    0b10010010,
+    0b00011100,
+    0b00000000,
+};
+
+unsigned char SLG[]={
+    0b10001110,
+    0b10010001,
+    0b10010001,
+    0b01111111,
+    0b00000000,
+};
+
+unsigned char SLI[]={
+    0b11111010,
+    0b00000000,
+};
+
+unsigned char SLL[]={
+    0b11111111,
+    0b00000000,
+};
+
+unsigned char SLN[]={
+    0b11111000,
+    0b00001000,
+    0b00001000,
+    0b11110000,
+    0b00000000,
+};
+
+unsigned char SLT[]={
+    0b00001000,
+    0b01111111,
+    0b10001000,
+    0b00000000,
+};
+
+unsigned char SLS[]={
+    0b11111111,
+    0b11111111,
+    0b01001100,
+    0b10010010,
+    0b10010010,
+    0b01100100,
+    0b00000000,
+};
+
+// 文字設定
+struct ST_CHARACTER{
+    unsigned char*      character;  // 文字
+    uint8_t             color;      // 文字色
+};
+
+static ST_CHARACTER mCharactors[] = {
+    {   SLA     ,LP3C_L_YELLOW},
+    {   SLA     ,LP3C_L_YELLOW},
+    {   SLA     ,LP3C_L_YELLOW},
+    {   SLA     ,LP3C_L_YELLOW},
+    {   NULL    ,0},
+};
+
+
+/*********************************************
+ * 変数
+**********************************************/
+// launchpadの表示状態
+static uint8_t mScreenData[8][8];
+// クロックの状態保持
+static uint8_t mClock;
+// Launchpad 描画情報
+static IntList mpDispLp3 = Midiglue::init_default<IntList>();
+// LaunchPad入出力許可フラグ
+static bool lpEnable = true;
+// 現在表示中の文字
+static uint8_t mTextNumber;
+// ドット出力位置
+static uint8_t mTextClumn;
+
+
+/*********************************************
+ * 関数
+**********************************************/
+/***********************************************************************
+ * 共通処理
+ ***********************************************************************/
+/*****************
+ * Launch pad への送信
+ * @param data  出力したい描画情報
+ * @param y 押されたボタンのy軸(0～1)
+ */
+static auto outLaunchPad = [&](){
+    if(lpEnable)
+    {
+        // 出力
+        out0 = mpDispLp3;
+    }
+};
+
+/*****************
+ * 表示のreDrow
+ */
+static auto reDrow = [&](){
+    for(int y=0;y<BOXSIZE_Y;y++){
+        for(int x=0;x<BOXSIZE_X;x++){
+            // スクリーンデータの情報を渡す
+            uint8_t color = mScreenData[x][y];
+            uint8_t mode = LP3B_NOMAL;
+            // LP3への送信
+            Lp3::addDot(mpDispLp3,mode,x,LOCATE_Y + y,color);
+        }
+    }
+};
+
+/*****************
+ * screen data設定
+ * @param x 設定位置(0～8)
+ * @param y 設定位置(0～8)
+ * @param color 設定したい色
+ */
+static auto setScreenData = [&](uint8_t x,uint8_t y,uint8_t color){
+    // 色に変更がある場合のみ
+    if(!(mScreenData[x][y] == color)){
+        // 色を設定
+        mScreenData[x][y]= color;
+        uint8_t mode = LP3B_NOMAL;
+        // LP3への送信
+        Lp3::addDot(mpDispLp3,mode,x,y,color);
+    }
+};
+
+/*****************
+ * 文字表示のBit情報取得
+ */
+static auto getLight = [&](){
+
+// 現在表示中の文字
+    unsigned char line = 0b00000000;
+    uint8_t textColor = LP3C_BLACK;
+
+// 既に全ての文字を表示済みの場合は黒を設定
+    if(mCharactors[mTextNumber].character != NULL){
+        // 対応するテキスト・表示ラインの取得
+        unsigned char* ch = mCharactors[mTextNumber].character;
+        textColor = mCharactors[mTextNumber].color;
+        line = ch[mTextClumn];
+
+        Midiglue::Debug::write_log("new Line:", line);
+
+        // 次のラインを設定
+        mTextClumn++;
+        // 全ライン送信済み
+        if(line == 0b00000000){
+            mTextClumn = 0;
+            mTextNumber++;
+        }
+    }
+
+
+    if(line != 0b00000000){
+        char tmp[40];
+
+        unsigned char mask = 0b10000000;
+        tmp[0]='*';
+        for(int y=0;y<BOXSIZE_Y;y++){
+            tmp[y+1] = (0 != (line & mask))?'1':'0';
+        }
+        tmp[BOXSIZE_Y+1]='\0';
+        Midiglue::Debug::write_log(tmp, 0);
+        mask >>= 1;
+    }
+
+
+    // 結果のラインを送る
+//    line = 0xaa;
+    unsigned char mask = 0b10000000;
+    for(int y=0;y<BOXSIZE_Y;y++){
+        uint8_t color = (0 != (line & mask))?textColor:LP3C_BLACK;
+        // データ更新
+        mScreenData[BOXSIZE_X-1][y] = color;
+        // LP3への送信
+        Lp3::addDot(mpDispLp3,LP3B_NOMAL,BOXSIZE_X-1,y,color);
+        // 次のドット
+        mask >>= 1;
+    }
+
+
+};
+
+// 単位時間毎にドットを左に動かす
+static auto timerFunction = [&](){
+//    Midiglue::Debug::write_log("timerFunction", 0);
+    for(int x=0;x<BOXSIZE_X-1;x++){
+        for(int y=0;y<BOXSIZE_Y;y++){
+            setScreenData(x,y,mScreenData[x+1][y]);
+        }
+    }
+    // 一番右の列を描画
+    getLight();
+};
+
+/***********************************************************************
+* 初期化処理
+ ***********************************************************************/
+static auto initDrow = [&](){
+    Midiglue::Debug::write_log("initDrow", 0);
+
+    // スクリーンデータのクリア
+    for(int y=0;y<BOXSIZE_Y;y++){
+        for(int x=0;x<BOXSIZE_X;x++){
+            mScreenData[x][y] = LP3C_L_GBLUE;
+        }
+    }
+
+    // Launchpadバッファのクリア
+    mpDispLp3->clear();
+    // LaunchPadへの送信バッファ設定
+    reDrow();
+    // 自動送信されないのでLaunchPadへの送信を行う
+    outLaunchPad();
+
+    // 変数初期化
+    // 現在表示中の文字
+    mTextNumber = 0;
+    // ドット出力位置
+    mTextClumn = 0;
+
+};
+
+/*****************
+ * LaunchPadからの入力
+ * @param x 押されたボタンのX軸(0～8)
+ * @param y 押されたボタンのy軸(0～8)
+ * @param value value値
+ */
+static auto pushButtun = [&](uint8_t x,uint8_t y,uint8_t value){
+    // boxの範囲内であることを確認(縦)
+    if(y < LOCATE_Y || y >= (LOCATE_Y + BOXSIZE_Y)){
+        return;
+    }
+    // // y軸補正
+    // y -= LOCATE_Y;
+
+    // boxの範囲内であることを確認(横)
+    if(x<LP3_maxXY){
+         Midiglue::Debug::write_log("pushButtun", x*10+y);
+        mScreenData[x][y] = LP3C_L_GREEN;
+    }
+    else { // ボックスの右側[>] が押されている。
+
+    }
+
+};
+
+// 入力：LaunchPad
+static auto inputLaunchPad = [&](MidiPacket packet){
+
+    // LaunchPad制御制限されている場合、onイベントは無視する。
+    // ※押しながら切り替えられる可能性があるため、offイベントは受ける
+    if(!lpEnable && 0 < packet.getControlValue())
+    {   return; }
+
+    // LaunchPadからの入力
+    // 押された場所の取得
+    static uint8_t x;
+    static uint8_t y;
+    if(Lp3::getLocation(packet,&x,&y)){
+        // 最上段のボタンクリック
+    }else {
+        // そのほかのボタン
+        pushButtun(x,y,packet.getControlValue());
+    };
+
+
+};
+
+/*********************************************
+* 割り込みイベント
+**********************************************/
+
+// LaunchPadの初期表示
+static auto initEvent = Midiglue::make_oneshot_us_event<>(initDrow);
+
+
+
+/*********************************************
+* 実行処理
+**********************************************/
+
+// バッファクリア
+mpDispLp3->clear();
+
+// セットアップ
+if (@setup){
+    // 3秒後に初期表示処理を呼び出す
+    initEvent->schedule(3000 * 1000);
+}
+else if (@in0){ // Enable
+    if (in0 == 0) {
+        lpEnable = false;
+    } else {
+        lpEnable = true;
+        reDrow();
+    }
+}
+else if (@in1){
+    if(in1.isTimingClock()){
+        mClock = 0x03 & (mClock+1);
+        if(mClock == 0){
+            timerFunction();
+        }
+    }
+}
+else if (@in2){
+    // ■ LaunchPadからの入力
+    inputLaunchPad(in2);
+}
+else if (@in3){
+    // 現在表示中の文字
+    mTextNumber = 0;
+    // ドット出力位置
+    mTextClumn = 0;
+}
+// バッファがあればlaunchpadに送信
+if(0<mpDispLp3->size()){
+    outLaunchPad();
+}
