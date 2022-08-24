@@ -120,7 +120,7 @@ static auto lbAddData = [&](uint8_t mode,uint8_t locate,uint8_t color){
         Midiglue::Debug::write_log(" :",mLbRead);
         return;
     }
-    // 一杯で無いなら追加可能
+    // 追加可能
     mLp3LingBuff[mLbWrite].mode = mode;
     mLp3LingBuff[mLbWrite].locate = locate;
     mLp3LingBuff[mLbWrite].color = color;

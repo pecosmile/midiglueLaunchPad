@@ -1,0 +1,213 @@
+<Comment>
+muteCircuit
+
+Circuitにはmute処理がないので（Fuck）volumeを記憶、一時的に0にすることで
+ミュートの代わりにする
+
+kokou ni-sui@sabaco
+
+<I/O>
+input MidiPacket : MIDI入力（Digitakt）
+input IntList : mute処理情報(muteBox)
+output MidiPacket : MIDI出力(Digitakt)
+output IntList : mute処理情報(muteBox)
+
+<Description>
+TODO:後で書く
+
+<Parameter>
+parameter ChannelTbl = "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16" : Circuitのチャネルテーブル。
+parameter ExtendMuteCh = 16 : Extend Mute に使用するチャンネル（1-16）
+
+<Setup>
+// Bung設定
+${this}( &(Midiglue::__bang) , Midiglue::SETUP );
+
+<Code>
+
+/*****
+ * 定数
+ *****/
+static const std::vector<uint8_t> channelTbl{${ChannelTbl}};
+static const Midiglue::MIDICCType CIRCUIT_VOLUME = (Midiglue::MIDICCType) 29;
+
+/*****
+ * 変数
+ *****/
+// 出力バッファ(muteBox)
+static IntList pOutList = Midiglue::init_default<IntList>();
+// 現在のMuteステータス
+static uint8_t muteStatus[2];
+// チャンネル毎の音量
+static uint8_t mVolume[16];
+
+/*****************
+ * channel noから、muteBox上のインデックスを求める
+ * channel チャンネル
+ * index   インデックス
+ */
+static auto getTableIndex = [&](uint8_t channel, uint8_t* index) -> bool {
+    for(uint8_t i=0;i< LP3_maxXY*2 ;i++) {
+        if(channelTbl.at(i) == channel){
+            *index = i;
+            return(true);
+        }
+    }
+    return(false);
+};
+
+
+/*****************
+ * mute CC Packet処理
+ */
+static auto inputVolumePacket = [&](MidiPacket packet){
+
+    // Midiglue::Debug::write_log("inputMutePacket", packet.getControlNumber());
+    // Midiglue::Debug::write_log("channel", packet.getChannel());
+
+    // channel とvolume
+    uint8_t volume = packet.getControlValue();
+    uint8_t channel = packet.getChannel();
+
+    // volumeを記憶
+    // volumeがcircuit側で0になったら、muteBox側をmute扱いにする
+    // 対応するボリュームは100 (設計時点の考えだけど、ちょっと危ない)
+    mVolume[channel - 1] = (volume>0) ? volume : 100;
+
+    // チャンネルテーブル逆引き
+    uint8_t index = 0;
+    if(false == getTableIndex(channel, &index))
+    {   return; }
+
+    // indexを段数と位置に変換
+    uint8_t i = index / LP3_maxXY;
+    uint8_t s = index % LP3_maxXY;
+
+    uint8_t mask = (0x80 >> s);
+
+    if(volume > 0) {
+        muteStatus[i] = muteStatus[i] | mask;
+    } else {
+        muteStatus[i] = muteStatus[i] & ~mask;
+    }
+
+    pOutList->clear();
+    pOutList->push_back(muteStatus[0]);
+    pOutList->push_back(muteStatus[1]);
+
+    out1 = pOutList;
+
+};
+
+
+/*****************
+ * mute情報送信
+ * channel:送信したいチャンネル
+ * mute:muteフラグ
+ */
+static auto sendMuteCC = [&](uint8_t channel,bool mute){
+    uint8_t dat = (mute) ? mVolume[channel - 1]:0;  // on(0)/off(127)
+    out0 = MidiPacket::makeControlChange(channel,CIRCUIT_VOLUME,dat);
+};
+
+
+/*****************
+ * mute情報送信
+ * flgRefresh:全データ送信フラグ
+ * muteData[]:muteデータ（２バイト）
+ * circuitは8chしか使わないが、なんか用途がありそうな気がするので16ch対応しておく
+ */
+static auto extendMute = [&](bool flgRefresh,uint8_t* muteData){
+
+    for(uint8_t y=0;y<2;y++){
+
+        // ステータスと入力値のXOR
+        uint8_t datXor = muteStatus[y] ^ muteData[y];
+        // 全データ送信不要かつ、8bitが一致していたらcountinue
+        if(!flgRefresh && datXor == 0)
+        {   continue;   }
+
+        // 8bit内の処理
+        uint8_t mask = 0x80;
+        for(uint8_t x=0;x<LP3_maxXY;x++) {
+            uint8_t i = y*LP3_maxXY+x;
+
+            // 全データ送信もしくは、対応bitに変更がある場合のみ送信。
+            if(flgRefresh || (0<(mask & datXor)))
+            {
+                // CircuitのVolume変更
+                sendMuteCC(channelTbl.at(i),(0<(mask & muteData[y])));
+                // Midiglue::Debug::write_log("send CC", channel);
+            }
+
+            mask = mask >> 1;
+        }
+        // ステータスを設定
+        muteStatus[y] = muteData[y];
+    }
+
+};
+
+
+/*****************
+ * Cc入力処理
+ */
+static auto inputCcPacket = [&](MidiPacket packet){
+
+    // control change以外は処理なし
+    if(!packet.isControlChange()){
+        return;
+    }
+
+    // mute CC処理
+    if(packet.getControlNumber() == (uint8_t)CIRCUIT_VOLUME){
+        inputVolumePacket(packet);
+    }
+
+};
+
+
+if(@setup){
+    // フラグの初期化
+    muteStatus[0] = 0xff;
+    // muteBoxへ色情報を送信
+    pOutList->clear();
+    pOutList->push_back(LP3C_BROWN);
+    pOutList->push_back(LP3C_YELLOW);
+    pOutList->push_back(LP3C_BPURPLE);
+    pOutList->push_back(LP3C_LGREEN);
+    pOutList->push_back(LP3C_WRED);
+    pOutList->push_back(LP3C_GREEN);
+    pOutList->push_back(LP3C_BLUE);
+    pOutList->push_back(LP3C_PINK);
+    pOutList->push_back(LP3C_BLACK);
+    pOutList->push_back(LP3C_BLACK);
+    pOutList->push_back(LP3C_BLACK);
+    pOutList->push_back(LP3C_BLACK);
+    pOutList->push_back(LP3C_BLACK);
+    pOutList->push_back(LP3C_BLACK);
+    pOutList->push_back(LP3C_BLACK);
+    pOutList->push_back(LP3C_BLACK);
+
+    out1 = pOutList;
+
+    // チャンネル毎の音量初期化
+    for(uint8_t i=0;i<16;i++){
+        mVolume[i] = 100;
+    }
+
+
+}else if(@in0) {
+    inputCcPacket(in0);
+}else if(@in1) {
+
+    // 全データ送信フラグ
+    bool flgRefresh = ((3<=in1->size()) && 0<(in1->at(2)&LP3_MB_REFRESH_MUTE));
+    // mute data
+    // このデータを変更して、muteを送る。
+    uint8_t muteData[2];
+    muteData[0] = in1->at(0);
+    muteData[1] = in1->at(1);
+    // mute送信
+    extendMute(flgRefresh,muteData);
+}

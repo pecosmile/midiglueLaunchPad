@@ -7,6 +7,7 @@ kokou ni-sui@sabaco
 input Int : LaunchPad制御（0=Disable）
 input MidiPacket : proglam change入力
 input MidiPacket : launchpadからの入力
+input Int : プログラムチェンジタイミング(10を受けるとプログラムチェンジ)
 output MidiPacket : proglam change出力
 output IntList : 描画情報。lpControlへの接続します。
 
@@ -22,6 +23,7 @@ LaunchPad上に、プログラムチェンジ用の画面を表示、押した�
 parameter Locate = 0 : 描画位置(0-6)
 parameter Height = 4 : 描画範囲(2-8)
 parameter Channel = 16 : チャンネル(1-16)
+parameter LinkBarGage = false : BarGageBoxとのリンク
 
 <Setup>
 // Bung設定
@@ -82,6 +84,8 @@ static uint8_t mScrool = 0;
 static uint8_t mNowPrgNo = 0xff;
 // 指定したプログラムNo
 static uint8_t mSettingPrgNo = 0xff;
+// 古いプログラムNo
+static uint8_t mOldPrgNo = 0xff;
 
 // LaunchPad入出力許可フラグ
 static bool lpEnable = true;
@@ -247,6 +251,15 @@ static auto inputScrool = [&](int vactor) -> bool {
 };
 
 
+/*****************
+ * programChange送信
+ * @param value value値
+ */
+static auto sendProgramchange = [&](uint8_t prgNo){
+    auto packet = MidiPacket::makeProgramChange(MIDI_CH, prgNo);
+    out0 = packet;
+};
+
 
 /*****************
  * LaunchPadからの入力
@@ -278,8 +291,9 @@ static auto inputProgramChange = [&](uint8_t x,uint8_t y,uint8_t value){
         drowProglamNo(oldPrgNo);
         drowProglamNo(mSettingPrgNo);
         // midi outへの出力
-        auto packet = MidiPacket::makeProgramChange(MIDI_CH, prgNo);
-        out0 = packet;
+        if(!${LinkBarGage}){
+            sendProgramchange(mSettingPrgNo);
+        }
     }
     else { // ボックスの右側[>] が押されている。
         // y軸補正
@@ -346,6 +360,21 @@ else if (@in1){ // goove boxからの入力
 else if (@in2) { // LaunchPadからの入力
     inputLaunchPad(in2);
 }
+else if (@in3) { // varGageBoxからの入力
+    // midi outへの出力
+    if(${LinkBarGage} && (in3 == 2)){
+        sendProgramchange(mSettingPrgNo);
+
+        // program No の変更
+        uint8_t oldPrgNo = mNowPrgNo;
+        mNowPrgNo = mSettingPrgNo;
+        // Launch Pad描画
+        drowProglamNo(oldPrgNo);
+        drowProglamNo(mNowPrgNo);
+    }
+}
+
+
 
 // バッファがあればlaunchpadに送信
 if(0<mpDispLp3->size()){
