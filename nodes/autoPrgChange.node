@@ -116,8 +116,8 @@ static auto sendProgramchange = [&](uint8_t prgNo){
     out0 = packet;
 };
 
-/*********************************************
-* プログラムチェンジデータ設定
+/*******************************jjkkkkkkk**************
+* プログラムチェンジデータ設定kk46k
 * index：インデックス
 * sendPgFlag：programCange送信するか
 **********************************************/
@@ -127,18 +127,22 @@ static auto setBarData = [&](uint8_t index){
 }
 
 /*********************************************
-* プログラム情報出力
+* プログラム情報文字出力
 * index：インデックス
 * sendPgFlag：programCange送信するか
 **********************************************/
 static auto outPrgString = [&](){
     uint8_t i = 0;
-    
+    if(mIndex + 1 < mMaxData){
+        sptrintf(mDispProg,"%d >> %d");ggggg        
+    } else {
+        sptrintf(mDispProg,"%d >> end");
+    }
 }
 
 
 
-/*********************************************
+/*******************************************j**
 * クロック情報
 **********************************************/
 static auto inputClock = [&](MidiPacket packet){
