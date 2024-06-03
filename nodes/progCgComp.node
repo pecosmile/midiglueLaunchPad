@@ -1,0 +1,60 @@
+<Comment>
+progCgComp
+
+TODO: プログラムチェンジを圧縮
+
+kokou ni-sui@sabaco
+
+<I/O>
+input MidiPacket : MIDI入力
+output MidiPacket : MIDI出力
+
+<Description>
+TODO:後で書く
+
+<Parameter>
+
+<Setup>
+
+<Code>
+
+/*****
+ * 定数
+ *****/
+
+/*****
+ * 変数
+ *****/
+// スクロール位置
+static uint8_t mPrgNo = 0;
+
+
+/*****************
+ * Midi packetへの処理
+ */
+static auto funcMidiPacket = [&](MidiPacket packet){
+
+    // プログラムチェンジ以外はスルー
+    if(!packet.isProgramChange()){
+        out0 = packet;
+        return;
+    }
+
+    // program change
+    uint8_t pg = packet.getProgramNumber();
+
+    pg = pg - (pg % 16);
+
+    if(mPrgNo != pg) {
+        out0 = MidiPacket::makeProgramChange(16, pg);
+        mPrgNo = pg;
+    }
+
+};
+
+
+if(@setup){
+
+}else if(@in0) {
+    funcMidiPacket(in0);
+}

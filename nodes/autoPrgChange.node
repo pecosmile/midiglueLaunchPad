@@ -7,13 +7,15 @@ input MidiPacket : midi入力
 input Int : プログラム選択
 output MidiPacket : proglam change出力
 output String : program文字列送信
+output String : 小節文字列
 
 <Description>
 
 <Parameter>
 parameter Channel = 16 : チャンネル(1-16)
-parameter PrgCgData = "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16" : プログラムチェンジデータ
+parameter PrgCgData = "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15" : プログラムチェンジデータ
 parameter BarData = "8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8" : 各パターンの小節数
+parameter Knob = ["NOMAL", "ELECTRON", "ELECTRIBE"] : Target knob
 
 <Setup>
 // Bung設定
@@ -27,7 +29,10 @@ ${this}( &(Midiglue::__bang) , Midiglue::SETUP );
 static const uint8_t MIDI_CH = ${Channel};  // チャンネル
 
 static const std::vector<uint8_t> mPrgTable{${PrgCgData}};
+// static StringList mPrgTable = Midiglue::make_list<String>({${PrgCgData}});
 static const std::vector<uint8_t> mDataTable{${BarData}};
+
+static const uint8_t LP3_INIT_SYSEX[] = { 0xF2,0x00,0x00 };
 
 
 // システムパケット
@@ -43,6 +48,11 @@ static const uint8_t CLOCK4STEP = CLOCK1STEP*4;     // 4拍（１小節）
 // ステータス
 static const uint8_t ST_PLAING = 0x80;
 
+// プログラム設定
+static const uint8_t ST_PRG_NOMAL = 1;
+static const uint8_t ST_PRG_ELECTRON = 2;
+static const uint8_t ST_PRG_ELECTRIBE = 3;
+
 
 /*********************************************
  * 変数
@@ -51,7 +61,7 @@ static const uint8_t ST_PLAING = 0x80;
 static IntList mpDispLp3 = Midiglue::init_default<IntList>();
 
 // カウント
-static uint8_t mClockCount = 0;
+static uint8_t mClockCount = CLOCK4STEP;
 static uint8_t mBarCount = 0;
 static uint8_t mBarLength = 8;
 static uint8_t mStatus = 0;
@@ -59,7 +69,9 @@ static uint8_t mIndex = 0;
 static uint8_t mMaxData = 0;
 
 // プログラム表示
-static char mDispProg[40];
+static char mDispProg[20];
+// プログラム表示
+static char mDispBar[20];
 
 
 /*********************************************
@@ -71,60 +83,45 @@ static char mDispProg[40];
  ***********************************************************************/
 
 /*****************
- * Launch pad への送信
- * @param data  出力したい描画情報
- * @param y 押されたボタンのy軸(0～1)
+ * programChange送信
+ * @param value value値
  */
-static auto outLaunchPad = [&](){
-    if(lpEnable)
-    {
-        // 出力
-        out0 = mpDispLp3;
-    }
+static auto sendProgramchange = [&](uint8_t prgNo){
+    // 
+    // uint8_t prgNo = 0;
+    // switch(ST_PRG_${BarData}){
+    // case ST_PRG_NOMAL:
+    //     char* a = prgStr.data();
+
+    // break;
+
+    // case ST_PRG_ELECTRON:
+    // break;
+
+    // case ST_PRG_ELECTRIBE:
+    // break;
+    // }
+
+    auto packet = MidiPacket::makeProgramChange(MIDI_CH, prgNo -1);
+    out0 = packet;
 };
 
 
-
-/***********************************************************************
-* 再描画
- ***********************************************************************/
-static auto reDrow = [&](){
-    for(int x=0;x<LP3_maxXY;x++){
-        uint8_t color = COLOR_BACK;
-
-        if( x<mBarCount+1 ){
-            color = COLOR_B;
-        } else if( x<mBarLength ){
-            color = COLOR_A;
-        }
-        // 描画
-        Lp3::addDot(mpDispLp3,LP3B_NOMAL,x,LOCATE_Y,color);
-    }
-
-};
-
-/***********************************************************************
-* 初期化処理
- ***********************************************************************/
 
 /*****************
  * programChange送信
  * @param value value値
  */
-static auto sendProgramchange = [&](uint8_t prgNo){
-    auto packet = MidiPacket::makeProgramChange(MIDI_CH, prgNo);
+static auto sendSPPReset = [&](){
+
+    auto packet = MidiPacket::makeInvalidPacket();
+    packet.event_type = Midiglue::MIDIEventType::SystemCommonThreeBytes;
+    packet.byte0 = 0xF2;
+    packet.byte1 = 0x00;
+    packet.byte2 = 0x00;
     out0 = packet;
 };
 
-/*******************************jjkkkkkkk**************
-* プログラムチェンジデータ設定kk46k
-* index：インデックス
-* sendPgFlag：programCange送信するか
-**********************************************/
-static auto setBarData = [&](uint8_t index){
-    // 現在のpatternの小節数を設定(最低１小節)
-    mBarCount = max(BarData.at(index),1) - 1;
-}
 
 /*********************************************
 * プログラム情報文字出力
@@ -134,12 +131,36 @@ static auto setBarData = [&](uint8_t index){
 static auto outPrgString = [&](){
     uint8_t i = 0;
     if(mIndex + 1 < mMaxData){
-        sptrintf(mDispProg,"%d >> %d");ggggg        
+        sprintf(mDispProg,"%d >> %d",
+            mPrgTable.at(mIndex),mPrgTable.at(mIndex+1));       
     } else {
-        sptrintf(mDispProg,"%d >> end");
+        sprintf(mDispProg,"%d >> end",mPrgTable.at(mIndex));
     }
-}
 
+    out1 = Midiglue::make_string(mDispProg);
+};
+
+/*********************************************
+* 小節情報文字出力
+* index：インデックス
+* sendPgFlag：programCange送信するか
+**********************************************/
+static auto outBarString = [&](){
+    sprintf(mDispBar,"%d/%d",mBarCount,mDataTable.at(mIndex));
+    out2 = Midiglue::make_string(mDispBar);
+};
+
+
+/*********************************************
+* プログラムチェンジデータ設定
+* index：インデックス
+* sendPgFlag：programCange送信するか
+**********************************************/
+static auto setBarData = [&](uint8_t index){
+    // 現在のpatternの小節数を設定(最低１小節)
+    mBarCount = mDataTable.at(index);
+
+};
 
 
 /*******************************************j**
@@ -149,27 +170,38 @@ static auto inputClock = [&](MidiPacket packet){
     // init bung
     if(packet == CLOCK && 0 < (mStatus & ST_PLAING) ){
         // clock信号
-        ++mClockCount;
-        mClockCount %= CLOCK4STEP;
+        --mClockCount;
+
         // CLOCK4STEP毎に１ブロック進む
         if(0 == mClockCount){// 一小節区切り
             // 小節カウント
             --mBarCount;
+            // 小節情報更新
+            outBarString();
             if(mBarCount == 0){
                 setBarData(mIndex);
             }
+            // カウンタリセット
+            mClockCount = CLOCK4STEP;
 
         }
 
         // 設定された小節数終了の直前に次のprgramChangeを送る。
         if(mIndex + 1 < mMaxData 
-            && 0 == mBarCount 
-            && (CLOCK1STEP*3) == mClockCount ){
+            && 1 == mBarCount
+            && 1 == mClockCount ){
+                Midiglue::Debug::write_log("program change", mIndex);
+                Midiglue::Debug::write_log("value", mPrgTable.at(mIndex));
 
+                sendSPPReset();
                 // 次に指定されたprogramChangeを送る。
                 ++mIndex;
-                sendProgramchange(mPrgTable(mIndex));
+                sendProgramchange(mPrgTable.at(mIndex));
+                // Display
+                outPrgString();
         }
+
+
 
     }else if(packet == START || packet == CONTINUE) {
         // 再生ステータス設定
@@ -178,7 +210,7 @@ static auto inputClock = [&](MidiPacket packet){
     }
     else if(packet == STOP){
         // 再生状況をリセットする。
-        mClockCount = 0;
+        mClockCount = CLOCK4STEP;
         mBarCount = 0;
         // 再生ステータス設定
         mStatus &= (~ST_PLAING);
@@ -192,9 +224,12 @@ static auto inputClock = [&](MidiPacket packet){
 static auto inputSelectProgram = [&](Int index){
     if(0<=index && index < mMaxData){
         mIndex = index;
-        // 再生中出ない場合はプログラムチェンジを送る
+        // 再生中でない場合はプログラムチェンジを送る
         if(!(mStatus & ST_PLAING)){
-            sendProgramchange(mPrgTable(mIndex));
+            sendSPPReset();
+            sendProgramchange(mPrgTable.at(mIndex));
+            // Display
+            outPrgString();
         }
     }
 };
@@ -213,11 +248,13 @@ mpDispLp3->clear();
 // セットアップ
 if (@setup){
     // programChangeと小節数で少ないほうが最大値
-    mMaxData = min(channelTbl.size(),mDataTable.size());
+    mMaxData = min(mPrgTable.size(),mDataTable.size());
+    Midiglue::Debug::write_log("mMaxData", mMaxData);
+    outPrgString();
 }
 else if (@in0){ // Enable
     inputClock(in0);
-else if (@in1){ // Enable
+}else if (@in1){ // Enable
     inputSelectProgram(in1);
 }
-}
+

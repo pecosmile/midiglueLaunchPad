@@ -214,6 +214,10 @@ static auto inputCcPacket = [&](MidiPacket packet){
         return;
     }
 
+        Midiglue::Debug::write_log("ch", packet.getChannel());
+        Midiglue::Debug::write_log("CC", packet.getControlNumber());
+        Midiglue::Debug::write_log("CCv", packet.getControlValue());
+
     // mute CC処理
     if(packet.getControlNumber() == (uint8_t)DTKCC_Mute){
         inputCcMutePacket(packet);
