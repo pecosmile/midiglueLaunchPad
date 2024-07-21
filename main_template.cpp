@@ -122,8 +122,8 @@ static const uint8_t LP3C_WRED = 0x39;
 static const uint8_t LP3C_I_WRED = 0x3A;
 static const uint8_t LP3C_D_WRED = 0x3B;
 
-static const uint8_t LP3C_ORANGE = 0x3C;
 static const uint8_t LP3C_L_ORANGE = 0x3D;
+static const uint8_t LP3C_ORANGE = 0x3C;
 
 /** モード */
 static const uint8_t LP3B_NOMAL = 0;    // ノーマル

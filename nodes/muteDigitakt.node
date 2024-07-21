@@ -43,6 +43,8 @@ static const uint8_t DTKCC_MuteExMuteA = 1;
 static const uint8_t DTKCC_MuteExMuteB = 2;
 static const uint8_t DTKCC_MuteExMuteC = 3;
 static const uint8_t DTKCC_MuteExMuteD = 4;
+static const uint8_t DTKCC_MuteExMuteOn = 40;
+static const uint8_t DTKCC_MuteExMuteOff = 41;
 
 // 4bit単位で順番の前後を入れ替える
 static const uint8_t tblBitRev[] = {
@@ -160,6 +162,30 @@ static auto updateMuteMap = [&](uint8_t* target,uint8_t cc,uint8_t value){
     target[y] = (target[y] & mask) | value;
 };
 
+
+/**
+ * muteの設定変更(1ビットのみ)
+ * target:変更対象
+ * cc:ON or OFF
+ * value: 変更チャンネル(1-16)
+ */
+static auto updateMuteMapSingle = [&](uint8_t* target,uint8_t cc,uint8_t value){
+    uint8_t y = 0;
+    uint8_t mask = 0x01;
+
+    // valueで指定されたパートに合わせたマスクを作成
+    mask = mask << (16 - value)%8;
+    // 9以上の時はバッファが変わるのでy=1
+    y = (value > 8) ? 1:0;
+
+    // valueに対応したデータを変更する。
+    target[y] |= mask;
+    if(cc == (uint8_t)DTKCC_MuteExMuteOff) {
+        // muteoff の時は同じ値を xorすることでoffにする
+        target[y] ^= mask;
+    }
+};
+
 /*****************
  * extend mute CC Packet処理
  * ※呼び出す前に、チャンネルのチェックは済ませて下さい。
@@ -168,37 +194,42 @@ static auto inputExtendMutePacket = [&](MidiPacket packet){
     uint8_t value = packet.getControlValue();
     uint8_t cc = packet.getControlNumber();
 
-    // CCが、extend muteの対象でない。または、valueの値が0～15の範囲に無い場合は処理しない
-    if( !(value <= 0x0f)
-        ||!(    cc == (uint8_t)DTKCC_MuteExMuteA
-                || cc == (uint8_t)DTKCC_MuteExMuteB
-                || cc == (uint8_t)DTKCC_MuteExMuteC
-                || cc == (uint8_t)DTKCC_MuteExMuteD)
-    ) {
-        return;
-    }
-
-    // Midiglue::Debug::write_log("inputExtendMutePacket", packet.getControlNumber());
-
     // mute data
     // このデータを変更して、muteを送る。
     uint8_t muteData[2];
     muteData[0] = muteStatus[0];
     muteData[1] = muteStatus[1];
 
-    // muteDataを更新
-    updateMuteMap(muteData,cc,value);
+    if(value<=0x0f 
+            &&(    cc == (uint8_t)DTKCC_MuteExMuteA
+                || cc == (uint8_t)DTKCC_MuteExMuteB
+                || cc == (uint8_t)DTKCC_MuteExMuteC
+                || cc == (uint8_t)DTKCC_MuteExMuteD))
+    {
+        // CCが、extend muteの対象かつ、valueの値が0～15
+        // Muteセット
+        // Midiglue::Debug::write_log("inputExtendMutePacket", packet.getControlNumber());
+        // muteDataを更新
+        updateMuteMap(muteData,cc,value);
 
-    // mute送信
-    // // TODO:たぶんこれを送らなくてもなんとかなるはず
-    // extendMute(false,muteData);
-
+    }
+    else if(value>00 && value<=16
+        && (       cc == (uint8_t)DTKCC_MuteExMuteOff
+                || cc == (uint8_t)DTKCC_MuteExMuteOn)){
+        updateMuteMapSingle(muteData,cc,value);
+    }
+    else{
+        // どれでも無ければ送る必要は無い
+        return;
+    }
     // LaunchPadへの送信
     pOutList->clear();
     pOutList->push_back(muteData[0]);
     pOutList->push_back(muteData[1]);
 
     out1 = pOutList;
+
+
 
 };
 
@@ -213,11 +244,6 @@ static auto inputCcPacket = [&](MidiPacket packet){
     if(!packet.isControlChange()){
         return;
     }
-
-        Midiglue::Debug::write_log("ch", packet.getChannel());
-        Midiglue::Debug::write_log("CC", packet.getControlNumber());
-        Midiglue::Debug::write_log("CCv", packet.getControlValue());
-
     // mute CC処理
     if(packet.getControlNumber() == (uint8_t)DTKCC_Mute){
         inputCcMutePacket(packet);
@@ -225,6 +251,8 @@ static auto inputCcPacket = [&](MidiPacket packet){
 
     // Extend mute CC処理
     if(packet.getChannel() == ${ExtendMuteCh} ){
+        Midiglue::Debug::write_log("ch", packet.getChannel());
+        Midiglue::Debug::write_log("CC", packet.getControlNumber());
         inputExtendMutePacket(packet);
     }
     else {

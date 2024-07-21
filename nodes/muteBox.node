@@ -54,7 +54,6 @@ static const uint8_t CR_SOLO = LP3C_L_ORANGE;
 static const uint8_t ST_MUTE = 1;
 static const uint8_t ST_SOLO = 2;
 static const uint8_t ST_MUTELOCK = 3;
-static const uint8_t ST_FILTERSETTING = 4;
 
 /**********************
  * 変数
@@ -146,11 +145,7 @@ static auto getColor = [&](uint8_t x,uint8_t y) -> uint8_t {
 
     uint8_t color = LP3C_BLACK;
 
-    if(mStatus != ST_FILTERSETTING){
-        color = getColorMuteMode(x,y);
-    } else {
-        color = getColorFilterSetting(x,y);
-    }
+    color = getColorMuteMode(x,y);
     return(color);
 };
 
@@ -245,25 +240,11 @@ static auto initDrow = [&](){
     outLaunchPad();
 };
 
-/**********************************************
- * mute lockボタン押下のタイマーアウト
- */
-static auto onTimerFilter = [&](){
-    mStatus = ST_FILTERSETTING;
-    // LaunchPadへの送信バッファ設定
-    reDrow();
-    // 自動送信されないのでLaunchPadへの送信を行う
-    outLaunchPad();
-
-};
-
 /*********************************************
 * 割り込みイベント
 **********************************************/
 // LaunchPadの初期表示
 static auto initEvent = Midiglue::make_oneshot_us_event<>(initDrow);
-// LaunchPadの初期表示
-static auto timerFilterMode = Midiglue::make_oneshot_us_event<>(onTimerFilter);
 
 
 /***********************************************************************
@@ -333,15 +314,8 @@ static auto pushPartArea = [&](uint8_t x,uint8_t y){
         mStatus = ST_MUTE;
     break;
     case ST_MUTELOCK:
-        // タイマキャンセル
-        timerFilterMode->cancel();
         // ミュートロック処理
         tarnMute(mMuteLock,x,y);
-    break;
-    case ST_FILTERSETTING:
-        // フィルタ処理
-        tarnMute(mFilter,x,y);
-
     break;
     }
 };
@@ -352,20 +326,12 @@ static auto pushPartArea = [&](uint8_t x,uint8_t y){
 static auto pushMuteLock = [&](){
     switch(mStatus){
     case ST_MUTE:
-        // タイマ設定（3秒）
-        timerFilterMode->schedule(3000 * 1000);
         // ステータスをmute lockに変更
         mStatus = ST_MUTELOCK;
     break;
     case ST_SOLO:
     break;
     case ST_MUTELOCK:
-    break;
-    case ST_FILTERSETTING:
-        // ステータスをmute modeに変更
-        mStatus = ST_MUTE;
-        // LaunchPadへの送信バッファ設定
-        reDrow();
     break;
     }
 };
@@ -379,12 +345,8 @@ static auto releaseMuteLock = [&](){
     case ST_SOLO:
     break;
     case ST_MUTELOCK:
-        // タイマキャンセル
-        timerFilterMode->cancel();
         // ステータスをmute modeに変更
         mStatus = ST_MUTE;
-    break;
-    case ST_FILTERSETTING:
     break;
     }
 };
@@ -399,8 +361,6 @@ static auto pushSolo = [&](){
     case ST_SOLO:
     break;
     case ST_MUTELOCK:
-    break;
-    case ST_FILTERSETTING:
     break;
     }
 };
@@ -423,8 +383,6 @@ static auto releaseSolo = [&](){
         mStatus = ST_MUTE;
     break;
     case ST_MUTELOCK:
-    break;
-    case ST_FILTERSETTING:
     break;
     }
 };

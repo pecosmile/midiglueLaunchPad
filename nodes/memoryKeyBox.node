@@ -5,6 +5,7 @@ kokou ni-sui@sabaco
 
 <I/O>
 input Int : LaunchPad制御（0=Disable）
+input MidiPacket : midi入力（入力を光らせる）
 input MidiPacket : launchpadからの入力
 output IntList : 描画情報。lpControlへの接続します。
 output MidiPacket : midi出力
@@ -625,6 +626,23 @@ static auto pushButtun = [&](uint8_t x,uint8_t y,uint8_t value){
 
 };
 
+// 入力：midi
+static auto inputMidi = [&](MidiPacket packet){
+    // LaunchPad制御制限されている場合は無効
+    // この処理は画面表示のみのため、Onイベントも不要
+    if(!lpEnable)
+    {   return; }
+
+    // Note以外は無効,設定チャンネル以外は無効
+    if(!packet.isNote() || ${outputCh}!=packet.getChannel()){
+        return;
+    }
+
+    // noteに合わせて色のを変える
+    uint8_t note = (uint8_t) packet.getNoteNumber();
+    drowKey(note,packet.isNoteOn() ? 100 : 0);
+};
+
 // 入力：LaunchPad
 static auto inputLaunchPad = [&](MidiPacket packet){
 
@@ -671,8 +689,11 @@ else if (@in0){ // Enable
         reDrow();
     }
 }
-else if (@in1) { // LaunchPadからの入力
-    inputLaunchPad(in1);
+else if (@in1) { // 入力
+    inputMidi(in1);
+}
+else if (@in2) { // LaunchPadからの入力
+    inputLaunchPad(in2);
 }
 
 // バッファがあればlaunchpadに送信

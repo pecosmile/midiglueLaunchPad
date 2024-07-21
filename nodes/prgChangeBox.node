@@ -8,13 +8,14 @@ input Int : LaunchPad制御（0=Disable）
 input MidiPacket : proglam change入力
 input MidiPacket : launchpadからの入力
 input Int : プログラムチェンジタイミング(10を受けるとプログラムチェンジ)
+input Int : 設定モード入力(Bang受け)
 output MidiPacket : proglam change出力
 output IntList : 描画情報。lpControlへの接続します。
+output String : ステータス情報を出力します。
 
 <Description>
 LaunchPad上に、プログラムチェンジ用の画面を表示、押した場所に対応するプログラムを送ります。
 また、入力したprogram changeに対応するボタンを光らせます。
-現在の所、スクロール機能が無いため、表示範囲外のプログラムは選択・表示できません
 
 ※ノード単体では動きません。main_template.cppに、専用の定数・クラスを設定する必要があります。
 
@@ -43,19 +44,51 @@ static const uint8_t SCROOL_MAX = 16;  // スクロールの最大値(8*16)
 static const uint8_t SCROOL_UP = LP3K_UP;       // スクロール：上
 static const uint8_t SCROOL_DOWN = LP3K_DOWN;   // スクロール：下
 
+static const uint8_t PRGST_BLANK = 0;       // 空
+static const uint8_t PRGST_SET = 10;        // データあり
+static const uint8_t PRGST_FILL = 20;       // FILL
+
+// システムパケット
+static const auto CLOCK = MidiPacket::makeTimingClock();
+static const auto STOP = MidiPacket::makeTimingClockStop();
+static const auto START = MidiPacket::makeTimingClockStart();
+static const auto CONTINUE = MidiPacket::makeTimingClockContinue();
 
 
-// プログラム識別用の色
-static const uint8_t mColor[8] = {
-    LP3C_I_YGREEN,  // 1:茶色
-    LP3C_RED,       // 2:赤
-    LP3C_I_BGREEN,  // 5:緑
-    LP3C_L_ORANGE,  // 3:オレンジ
-    LP3C_BLUE,      // 6:青
-    LP3C_YELLOW,    // 4:黄色
-    LP3C_PURPLE,    // 7:紫
-    LP3C_DK_GLAY    // 8:灰色
+// プログラム識別用の色(ベース)
+static const uint8_t mColor_base[8] = {
+    LP3C_D_RED,
+    LP3C_D_GBLUE,
+    LP3C_D_YELLOW,
+    LP3C_D_PINK,
+    LP3C_D_LGREEN,
+    LP3C_D_BLUE,
+    LP3C_D_PURPLE,
+    LP3C_D_LBLUE
 };
+// プログラム識別用の色(データあり)
+static const uint8_t mColor_light[8] = {
+    LP3C_L_RED,
+    LP3C_L_GBLUE,
+    LP3C_L_YELLOW,
+    LP3C_L_PINK,
+    LP3C_L_LGREEN,
+    LP3C_L_BLUE,
+    LP3C_L_PURPLE,
+    LP3C_L_LBLUE
+};
+// プログラム識別用の色(fillIn)
+static const uint8_t mColor_fill[8] = {
+    LP3C_L_ORANGE,
+    LP3C_L_ORANGE,
+    LP3C_L_ORANGE,
+    LP3C_L_ORANGE,
+    LP3C_L_ORANGE,
+    LP3C_L_ORANGE,
+    LP3C_L_ORANGE,
+    LP3C_L_ORANGE
+};
+
 
 // 色：現在プログラム
 static const uint8_t CL_NOW = LP3C_WHITE;
@@ -68,6 +101,12 @@ static const uint8_t CL_CURSOR_DOWN = LP3C_L_YELLOW;
 // ステータス
 static const uint8_t ST_IDOL = 0;       // IDOL
 static const uint8_t ST_WAIT = 1;       // プログラム変更待ち
+static const uint8_t ST_PG_WAIT = 10;   // セッティング(wait)
+static const uint8_t ST_PG_INPUT = 11;  // セッティング(入力中)
+
+// 1ステップ/クロック
+static const uint8_t CLOCK4STEP = 6;
+
 
 /*********************************************
  * 変数
@@ -76,6 +115,8 @@ static const uint8_t ST_WAIT = 1;       // プログラム変更待ち
 static IntList mpDispLp3 = Midiglue::init_default<IntList>();
 // ステータス
 static uint8_t mStatus = ST_IDOL;
+// ステータス表示文字列
+static String mStrStatus = Midiglue::make_string("IDLE");
 
 // スクロール位置
 static uint8_t mScrool = 0;
@@ -87,21 +128,33 @@ static uint8_t mSettingPrgNo = 0xff;
 // 古いプログラムNo
 static uint8_t mOldPrgNo = 0xff;
 
+// カウント
+static uint8_t mClockCount = 0;
+static uint8_t mBarCount = 0;
+static uint8_t mBarLength = 8;
+
 // LaunchPad入出力許可フラグ
 static bool lpEnable = true;
+
+// プログラム情報(縦16*横8)→y,x
+static uint8_t mPrgStateMap[SCROOL_MAX][BOXSIZE_X];
 
 /*********************************************
  * 関数
 **********************************************/
 
-// プログラム番号から変換
+// プログラム番号から表示位置に変換
 // prgNo < 0x80 でお願いします
+// prgNo:プログラム番号
+// x:x位置(ポインタ)
+// y:y位置(ポインタ)
 static auto progNo2Locate = [&](uint8_t prgNo,uint8_t* x,uint8_t* y){
     *x = prgNo%8;
     *y = prgNo/8;
 };
 
-// スクロール範囲内判定
+// yy位置が表示範囲内かどうかの判定
+// y:y位置
 static auto checkOfRangeIn = [&](uint8_t y) -> bool {
     if(y < mScrool || y >= mScrool + BOXSIZE_Y) {
         return(false);
@@ -110,13 +163,64 @@ static auto checkOfRangeIn = [&](uint8_t y) -> bool {
 
 };
 
-// 指定した段の色を返す
-static auto getBaseColor = [&](uint8_t y)-> uint8_t {
-    // 2段ごと（16ごと）に色を変える
-    return(mColor[y/2]);
+// ステータス設定
+static auto setStatus = [&](uint8_t status){
+
+    // ステータス変更
+    mStatus = status;
+
+    // ステータス出力
+    static String msg;
+    if(status < ST_PG_WAIT){
+        msg = Midiglue::make_string("IDLE");    
+    } else if(status == ST_PG_WAIT){
+        msg = Midiglue::make_string("wait data");
+    } else if(status == ST_PG_INPUT){
+        msg = Midiglue::make_string("input now...");
+    }
+    out2 = msg;
 };
 
-// program Noによって、色と明滅パターンの変更が必要な場合変更する
+// メモリ初期化
+static auto crearPrgStateMap = [&](){
+    static uint8_t x;
+    static uint8_t y;
+    // メモリ内容を全て初期化する。
+    for(y=0;y<SCROOL_MAX;y++){
+        for(x=0;x<BOXSIZE_X;x++){
+            mPrgStateMap[y][x] = PRGST_BLANK;
+        }
+    }
+};
+
+// 指定した段の色を返す
+static auto getBaseColor = [&](uint8_t x,uint8_t y)-> uint8_t {
+
+    // 設定したい色
+    uint8_t color = LP3C_BLACK;
+    // ステータスによって色を設定
+    switch(mPrgStateMap[y][x]){
+        case PRGST_SET:
+            color = mColor_light[y/2];
+        break;
+        case PRGST_FILL:
+            color = mColor_fill[y/2];
+        break;
+        default:
+            color = mColor_base[y/2];
+        break;
+    }
+
+    // 2段ごと（16ごと）に色を変える
+    return(color);
+};
+
+
+// 特殊色状態の設定
+// 演奏中のプログラム番号の場合はCL_NOW、送信済みのプログラム番号の場合はCL_SETTINGを設定
+// prgNo：判定したいプログラム番号
+// *color：色(戻り値)
+// *mode：明滅パターン(戻り値)
 static auto changeColorAndMode = [&](uint8_t prgNo,uint8_t* color,uint8_t* mode) {
     // 色と明滅パターンを変える
     if(prgNo == mNowPrgNo) {
@@ -145,7 +249,7 @@ static auto drowProglamNo = [&](uint8_t prgNo) {
     }
 
     // 色と明滅モードの設定
-    uint8_t color = getBaseColor(y);
+    uint8_t color = getBaseColor(x,y);
     uint8_t mode = LP3B_NOMAL;
     changeColorAndMode(prgNo,&color,&mode);
 
@@ -166,9 +270,13 @@ static auto reDrow = [&](){
     uint8_t prgNo = mScrool * 8;
 
     for(int y=0;y<BOXSIZE_Y;y++){
-        // 指定した段の色を取得
-        uint8_t baseColor = getBaseColor(y + mScrool);
+
+        // box上のy位置（描画範囲ではない）を確定
+        uint8_t boxY = y + mScrool;
         for(int x=0;x<BOXSIZE_X;x++){
+            // 指定した段の色を取得
+            uint8_t baseColor = getBaseColor(x,y + mScrool);
+            // 色と明滅パターンの設定
             uint8_t color = baseColor;
             uint8_t mode = LP3B_NOMAL;
             changeColorAndMode(prgNo,&color,&mode);
@@ -325,6 +433,113 @@ static auto inputLaunchPad = [&](MidiPacket packet){
 
 };
 
+// 入力：通常ステータス
+static auto inputMidiNomal = [&](MidiPacket packet){
+    // プログラムチェンジ処理
+    if (Midiglue::is_valid(packet) && MIDI_CH == packet.getChannel() && packet.isProgramChange()){
+        inputPrgChange(packet.getProgramNumber());
+    }
+};
+
+// 入力：プログラムデータ設定.クロック制御
+static auto inputMidiData = [&](MidiPacket packet){
+    // init bung
+    if(packet == CLOCK && mStatus == ST_PG_INPUT){
+        // clock信号
+        ++mClockCount;
+        // 16step進んだ所で終了
+        if(mClockCount >= 16 * CLOCK4STEP){
+            // Midiglue::Debug::write_log("ip:STOP");
+            setStatus(ST_IDOL);
+            reDrow();
+        }
+    }
+    else if(packet == START || packet == CONTINUE) {
+        // Midiglue::Debug::write_log("ip:START");
+        // ステータス設定（クリア）
+        setStatus(ST_PG_INPUT);
+        mClockCount = 0;
+    }
+    else if(packet == STOP){
+        // ステータス設定（完了）
+        setStatus(ST_IDOL);
+        reDrow();
+    }
+    else if(packet.isNote() && 0 < packet.getControlValue()){
+        // ノートONの場合
+        static uint8_t ch;
+        static uint8_t step;
+        static uint8_t x;
+        static uint8_t y;
+
+        // channelとstep取得
+        ch = (packet.getChannel() - 1) % 8;     // ch(0-7に変換)
+        step = mClockCount / CLOCK4STEP;        // step(0-15)
+
+        // 座標に変換
+        x = step % 8;
+        y = ch * 2 + (step < 8 ? 0:1);
+
+        // Midiglue::Debug::write_log("ip:ch",ch);
+        // Midiglue::Debug::write_log("ip:step",step);
+        // Midiglue::Debug::write_log("ip:x",x);
+        // Midiglue::Debug::write_log("ip:y",y);
+
+        // マトリクスへのデータ設定
+        if(packet.getVelocity() > 100){         // 100
+            mPrgStateMap[y][x] = PRGST_FILL;
+        }
+        else {
+            mPrgStateMap[y][x] = PRGST_SET;
+        }
+    }
+};
+
+
+// 入力：grooveBox
+static auto inputMidi = [&](MidiPacket packet){
+
+    if(mStatus<ST_PG_WAIT){ // 通常ステータス
+        inputMidiNomal(packet);
+    } else {
+        inputMidiData(packet);
+    }
+};
+
+// メモリ初期化
+static auto initPrgStateMap = [&](){
+    // メモリ内容を全て初期化する。
+    crearPrgStateMap();
+    setStatus(ST_IDOL);
+
+    // // 色テスト用
+    // uint8_t i = 0;
+    // for(i=0;i<SCROOL_MAX;i++) {
+    //     mPrgStateMap[i][1] = PRGST_SET;
+    // }
+    // for(i=0;i<SCROOL_MAX;i++) {
+    //     mPrgStateMap[i][3] = PRGST_FILL;
+    // }
+};
+
+
+// Bang入力
+static auto inputBang = [&](){
+    // メモリ内容を全て初期化する。
+    crearPrgStateMap();
+
+    // ステータスがノーマルの場合は、セッティングモードに変更
+    if(mStatus < ST_PG_WAIT){
+        Midiglue::Debug::write_log("bang ST_PG_WAIT");
+        setStatus(ST_PG_WAIT);
+    } else {
+        Midiglue::Debug::write_log("bang ST_IDOL");
+        setStatus(ST_IDOL);
+        reDrow();
+    }
+
+};
+
 /*********************************************
 * 割り込みイベント
 **********************************************/
@@ -340,8 +555,10 @@ mpDispLp3->clear();
 
 // セットアップ
 if (@setup){
-    // 3秒後に初期表示処理を呼び出す
-    initEvent->schedule(3000 * 1000);
+    // プログラムステータスマップの初期化
+    initPrgStateMap();
+    // 4秒後に初期表示処理を呼び出す
+    initEvent->schedule(4000 * 1000);
 }
 else if (@in0){ // Enable
     if (in0 == 0) {
@@ -352,10 +569,8 @@ else if (@in0){ // Enable
     }
 }
 else if (@in1){ // goove boxからの入力
-    // 指定channelにプログラムチェンジが来た場合
-    if (Midiglue::is_valid(in1) && MIDI_CH == in1.getChannel() && in1.isProgramChange()){
-        inputPrgChange(in1.getProgramNumber());
-    }
+    //
+    inputMidi(in1);
 }
 else if (@in2) { // LaunchPadからの入力
     inputLaunchPad(in2);
@@ -373,8 +588,9 @@ else if (@in3) { // varGageBoxからの入力
         drowProglamNo(mNowPrgNo);
     }
 }
-
-
+else if (@in4) { // bang受け
+    inputBang();
+}
 
 // バッファがあればlaunchpadに送信
 if(0<mpDispLp3->size()){
