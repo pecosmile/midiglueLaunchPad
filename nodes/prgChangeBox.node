@@ -44,9 +44,11 @@ static const uint8_t SCROOL_MAX = 16;  // スクロールの最大値(8*16)
 static const uint8_t SCROOL_UP = LP3K_UP;       // スクロール：上
 static const uint8_t SCROOL_DOWN = LP3K_DOWN;   // スクロール：下
 
+// プログラムのステータス
 static const uint8_t PRGST_BLANK = 0;       // 空
 static const uint8_t PRGST_SET = 10;        // データあり
-static const uint8_t PRGST_FILL = 20;       // FILL
+static const uint8_t PRGST_FILL1 = 20;      // FILL1
+static const uint8_t PRGST_FILL2 = 21;      // FILL2
 
 // システムパケット
 static const auto CLOCK = MidiPacket::makeTimingClock();
@@ -55,7 +57,7 @@ static const auto START = MidiPacket::makeTimingClockStart();
 static const auto CONTINUE = MidiPacket::makeTimingClockContinue();
 
 
-// プログラム識別用の色(ベース)
+// プログラム識別用の色(データ無し)
 static const uint8_t mColor_base[8] = {
     LP3C_D_RED,
     LP3C_D_GBLUE,
@@ -77,8 +79,19 @@ static const uint8_t mColor_light[8] = {
     LP3C_L_PURPLE,
     LP3C_L_LBLUE
 };
-// プログラム識別用の色(fillIn)
-static const uint8_t mColor_fill[8] = {
+// プログラム識別用の色(fillIn:1Bar)
+static const uint8_t mColor_fill1[8] = {
+    LP3C_BPURPLE,
+    LP3C_BPURPLE,
+    LP3C_BPURPLE,
+    LP3C_BPURPLE,
+    LP3C_BPURPLE,
+    LP3C_BPURPLE,
+    LP3C_BPURPLE,
+    LP3C_BPURPLE
+};
+// プログラム識別用の色(fillIn：2Bar)
+static const uint8_t mColor_fill2[8] = {
     LP3C_L_ORANGE,
     LP3C_L_ORANGE,
     LP3C_L_ORANGE,
@@ -97,6 +110,11 @@ static const uint8_t CL_SETTING = LP3C_BPURPLE;
 // 色：上下カーソル
 static const uint8_t CL_CURSOR_UP   = LP3C_L_YELLOW;
 static const uint8_t CL_CURSOR_DOWN = LP3C_L_YELLOW;
+// 色：モード変更ボタン
+static const uint8_t CL_MODE_IDOL    = LP3C_BGREEN;
+static const uint8_t CL_MODE_WAIT    = LP3C_D_BLUE;
+static const uint8_t CL_PG_WAIT      = LP3C_RED;
+static const uint8_t CL_PG_INPUT     = LP3C_L_BROWN;
 
 // ステータス
 static const uint8_t ST_IDOL = 0;       // IDOL
@@ -163,24 +181,6 @@ static auto checkOfRangeIn = [&](uint8_t y) -> bool {
 
 };
 
-// ステータス設定
-static auto setStatus = [&](uint8_t status){
-
-    // ステータス変更
-    mStatus = status;
-
-    // ステータス出力
-    static String msg;
-    if(status < ST_PG_WAIT){
-        msg = Midiglue::make_string("IDLE");    
-    } else if(status == ST_PG_WAIT){
-        msg = Midiglue::make_string("wait data");
-    } else if(status == ST_PG_INPUT){
-        msg = Midiglue::make_string("input now...");
-    }
-    out2 = msg;
-};
-
 // メモリ初期化
 static auto crearPrgStateMap = [&](){
     static uint8_t x;
@@ -203,8 +203,11 @@ static auto getBaseColor = [&](uint8_t x,uint8_t y)-> uint8_t {
         case PRGST_SET:
             color = mColor_light[y/2];
         break;
-        case PRGST_FILL:
-            color = mColor_fill[y/2];
+        case PRGST_FILL1:
+            color = mColor_fill1[y/2];
+        break;
+        case PRGST_FILL2:
+            color = mColor_fill2[y/2];
         break;
         default:
             color = mColor_base[y/2];
@@ -260,6 +263,37 @@ static auto drowProglamNo = [&](uint8_t prgNo) {
     Lp3::addDot(mpDispLp3,mode,x,LOCATE_Y + y,color);
 };
 
+/*****************
+ * モードボタン描画
+ */
+static auto drowModeButton = [&](){
+
+    // 縦が3以上の場合のみ描画
+    if(BOXSIZE_Y < 3){
+        return;
+    }
+
+    // 色の決定
+    uint8_t color = CL_MODE_IDOL;
+    switch(mStatus){
+        case ST_WAIT:
+            color = CL_MODE_WAIT;
+        break;
+        case ST_PG_WAIT:
+            color = CL_PG_WAIT;
+        break;
+        case ST_PG_INPUT:
+            color = CL_PG_INPUT;
+        break;
+    };
+
+    // 縦が3以上の場合のみ描画
+    Lp3::addDot(mpDispLp3,LP3B_NOMAL,8,LOCATE_Y + 2,color);
+
+};
+
+
+
 /***********************************************************************
 * 再描画
  ***********************************************************************/
@@ -290,8 +324,11 @@ static auto reDrow = [&](){
     Lp3::addDot(mpDispLp3,LP3B_NOMAL,8,LOCATE_Y + 0,CL_CURSOR_UP);
     Lp3::addDot(mpDispLp3,LP3B_NOMAL,8,LOCATE_Y + 1,CL_CURSOR_DOWN);
 
+    // モード変更ボタン
+    drowModeButton();
+
     // 外側を黒で塗る
-    for(int y=2;y<BOXSIZE_Y;y++){
+    for(int y=3;y<BOXSIZE_Y;y++){
         Lp3::addDot(mpDispLp3,LP3B_NOMAL,8,LOCATE_Y + y,LP3C_BLACK);
     }
     
@@ -342,6 +379,47 @@ static auto inputPrgChange = [&](uint8_t prgNo){
     drowProglamNo(mNowPrgNo);
 };
 
+/*****************
+ * ステータス設定
+ * @param status 変更するステータス
+ */
+static auto setStatus = [&](uint8_t status){
+
+    // ステータス変更
+    mStatus = status;
+
+    // モード変更ボタン描画
+    drowModeButton();
+
+    // ステータス出力
+    static String msg;
+    if(status < ST_PG_WAIT){
+        msg = Midiglue::make_string("IDLE");    
+    } else if(status == ST_PG_WAIT){
+        msg = Midiglue::make_string("wait data");
+    } else if(status == ST_PG_INPUT){
+        msg = Midiglue::make_string("input now...");
+    }
+    out2 = msg;
+};
+
+/***********************************************************************
+* モード変更ボタンを3秒押しっぱなし→wait dataに
+ ***********************************************************************/
+static auto changeMode2Wait = [&](){
+    // メモリ内容を全て初期化する。
+    crearPrgStateMap();
+    // セッティング(wait)
+    setStatus(ST_PG_WAIT);
+    // タイマ割り込み中は、自動送信されないのでLaunchPadへの送信を行う
+    outLaunchPad();
+};
+/*********************************************
+* 割り込みイベント
+**********************************************/
+// LaunchPadの初期表示
+static auto timerModeChange = Midiglue::make_oneshot_us_event<>(changeMode2Wait);
+
 
 // 入力：カーソルキーを押している場合
 static auto inputScrool = [&](int vactor) -> bool {
@@ -368,6 +446,34 @@ static auto sendProgramchange = [&](uint8_t prgNo){
     out0 = packet;
 };
 
+
+
+/****************
+ * Bang入力
+ * @param flgNoWait PG_WAITを即時実行するフラグ（bang処理)
+ */
+static auto inputBang = [&](bool flgNoWait){
+
+    // ステータスがノーマルの場合は、セッティングモードに変更
+    if(mStatus < ST_PG_WAIT){
+        if(flgNoWait) {
+            // メモリ内容を全て初期化する。
+            crearPrgStateMap();
+            // Midiglue::Debug::write_log("bang ST_PG_WAIT");
+            // ステータスを即変更
+            setStatus(ST_PG_WAIT);
+        } else {
+            // Midiglue::Debug::write_log("start timer");
+            // ボタンを3秒以上押しっぱなしを判定するためのタイマーをセット
+            timerModeChange->schedule(3000 * 1000);
+        }
+    } else {
+        // Midiglue::Debug::write_log("bang ST_IDOL");
+        setStatus(ST_IDOL);
+        reDrow();
+    }
+
+};
 
 /*****************
  * LaunchPadからの入力
@@ -406,10 +512,15 @@ static auto inputProgramChange = [&](uint8_t x,uint8_t y,uint8_t value){
     else { // ボックスの右側[>] が押されている。
         // y軸補正
         y -= LOCATE_Y;
-        // スクロール処理
-        if(0<value){
-            if(y==0) { inputScrool(-1); }
-            if(y==1) { inputScrool(+1); }
+        // モード切替
+        if(y==2) {
+            // ボタンを押した時はタイマースタート、離した時はキャンセル
+            if(0<value){    inputBang(false);    }
+            else{           timerModeChange->cancel(); }
+        } else if(0<value){
+            // スクロール
+            if(y==0) { inputScrool(-1); }   // 上スクロール
+            if(y==1) { inputScrool(+1); }   // 下スクロール
         }
     }
 
@@ -486,8 +597,11 @@ static auto inputMidiData = [&](MidiPacket packet){
         // Midiglue::Debug::write_log("ip:y",y);
 
         // マトリクスへのデータ設定
-        if(packet.getVelocity() > 100){         // 100
-            mPrgStateMap[y][x] = PRGST_FILL;
+        if(packet.getVelocity() > 120){         // 120
+            mPrgStateMap[y][x] = PRGST_FILL2;
+        }
+        else if(packet.getVelocity() > 100){    // 100
+            mPrgStateMap[y][x] = PRGST_FILL1;
         }
         else {
             mPrgStateMap[y][x] = PRGST_SET;
@@ -512,32 +626,17 @@ static auto initPrgStateMap = [&](){
     crearPrgStateMap();
     setStatus(ST_IDOL);
 
-    // // 色テスト用
-    // uint8_t i = 0;
-    // for(i=0;i<SCROOL_MAX;i++) {
-    //     mPrgStateMap[i][1] = PRGST_SET;
-    // }
-    // for(i=0;i<SCROOL_MAX;i++) {
-    //     mPrgStateMap[i][3] = PRGST_FILL;
-    // }
-};
-
-
-// Bang入力
-static auto inputBang = [&](){
-    // メモリ内容を全て初期化する。
-    crearPrgStateMap();
-
-    // ステータスがノーマルの場合は、セッティングモードに変更
-    if(mStatus < ST_PG_WAIT){
-        Midiglue::Debug::write_log("bang ST_PG_WAIT");
-        setStatus(ST_PG_WAIT);
-    } else {
-        Midiglue::Debug::write_log("bang ST_IDOL");
-        setStatus(ST_IDOL);
-        reDrow();
+    // 色テスト用
+    uint8_t i = 0;
+    for(i=0;i<SCROOL_MAX;i++) {
+        mPrgStateMap[i][1] = PRGST_SET;
     }
-
+    for(i=0;i<SCROOL_MAX;i++) {
+        mPrgStateMap[i][3] = PRGST_FILL1;
+    }
+    for(i=0;i<SCROOL_MAX;i++) {
+        mPrgStateMap[i][5] = PRGST_FILL2;
+    }
 };
 
 /*********************************************
@@ -589,7 +688,7 @@ else if (@in3) { // varGageBoxからの入力
     }
 }
 else if (@in4) { // bang受け
-    inputBang();
+    inputBang(true);
 }
 
 // バッファがあればlaunchpadに送信
