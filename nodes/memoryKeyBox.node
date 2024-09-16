@@ -48,26 +48,38 @@ static const uint8_t MEMORYCOLORS[MCOLOR_MAX] = {
     LP3C_L_LBLUE
 };
 
-// キーボード描画用
-static const uint8_t KEY_Z = LP3C_BLACK;        // キー（なし）
-static const uint8_t KEY_A = LP3C_PURPLE;       // メジャーキー
-static const uint8_t KEY_B = LP3C_I_PURPLE;     // マイナーキー
-static const uint8_t KEY_C = LP3C_L_PURPLE;     // Cキー
-static const uint8_t KEY_P = LP3C_RED;          // 押されたキー
+// キーボード描画用(ON)
+static const uint8_t KEY_ZO = LP3C_BLACK;        // キー（なし）
+static const uint8_t KEY_AO = LP3C_PURPLE;       // メジャーキー
+static const uint8_t KEY_BO = LP3C_I_PURPLE;     // マイナーキー
+static const uint8_t KEY_CO = LP3C_L_PURPLE;     // Cキー
+static const uint8_t KEY_PO = LP3C_RED;          // 押されたキー
+
+// キーボード描画用(OFF)
+static const uint8_t KEY_ZF = LP3C_BLACK;        // キー（なし）
+static const uint8_t KEY_AF = LP3C_DK_GLAY;       // メジャーキー
+static const uint8_t KEY_BF = LP3C_DK_GLAY;     // マイナーキー
+static const uint8_t KEY_CF = LP3C_LGT_GLAY;     // Cキー
 
 // CodeMemoryのメモリ最大
 static const uint8_t MAX_MEMORY = 4;
 
-// キーボード描画用の定数
-static const uint8_t mKeyColor[2][8] = {
-    {KEY_Z,KEY_B,KEY_B,KEY_Z,KEY_B,KEY_B,KEY_B,KEY_Z},
-    {KEY_C,KEY_A,KEY_A,KEY_A,KEY_A,KEY_A,KEY_A,KEY_C},
+// キーボード描画用の定数(ON)
+static const uint8_t mKeyColorOn[2][8] = {
+    {KEY_ZO,KEY_BO,KEY_BO,KEY_ZO,KEY_BO,KEY_BO,KEY_BO,KEY_ZO},
+    {KEY_CO,KEY_AO,KEY_AO,KEY_AO,KEY_AO,KEY_AO,KEY_AO,KEY_CO},
+};
+
+// キーボード描画用の定数(OFF)
+static const uint8_t mKeyColorOff[2][8] = {
+    {KEY_ZF,KEY_BF,KEY_BF,KEY_ZF,KEY_BF,KEY_BF,KEY_BF,KEY_ZF},
+    {KEY_CF,KEY_AF,KEY_AF,KEY_AF,KEY_AF,KEY_AF,KEY_AF,KEY_CF},
 };
 
 // 色：上下カーソル
 static const uint8_t CL_MEMORY_CLR  = LP3C_GREEN;       // メモリクリア
-static const uint8_t CL_CURSOR_UP   = LP3C_L_YELLOW;    // カーソル上
-static const uint8_t CL_CURSOR_DOWN = LP3C_L_YELLOW;    // カーソル舌
+static const uint8_t CL_CURSOR_NOMAL   = LP3C_L_YELLOW; // カーソル（ノーマル）
+static const uint8_t CL_CURSOR_CODESET = LP3C_L_BLUE;   // カーソル（コード設定）
 
 // Key → note変換テーブル
 static const int mTblKey2Note[2][8] = {
@@ -83,6 +95,10 @@ static const uint8_t mTblNote2KeyY[13] = {
     1,0,1,0,1,1,0,1,0,1,0,1,1
 };
 
+// ステータス
+static const uint8_t ST_KEY = 0;        // KEY入力
+static const uint8_t ST_CODESET = 1;    // コード設定
+
 /*********************************************
  * 変数
 **********************************************/
@@ -90,6 +106,8 @@ static const uint8_t mTblNote2KeyY[13] = {
 static IntList mpDispLp3 = Midiglue::init_default<IntList>();
 // LaunchPad入出力許可フラグ
 static bool lpEnable = true;
+// ステータス
+static uint8_t mStatus = ST_KEY;
 // オクターブ
 static uint8_t mOctave = 3;
 // key Map(押されているノートを管理するマップ))
@@ -105,6 +123,9 @@ static bool mPushCMClear = false;
 
 // 2段目のキーボード有無（将来動的にする可能性があるため変数にする）
 static bool mSecondKey = ${DoubleKey};
+
+// コードキー
+static uint16_t mCodeMap = 0;
 
 /*********************************************
  * 関数
@@ -126,15 +147,92 @@ static auto outLaunchPad = [&](){
 };
 
 /*****************
- * 指定位置のカラー定数を返す
+ * 指定位置のカラー定数を返す(On)
  * @param x     座標(x) → 0～7
  * @param y     座標(y) → 0～1（相対位置で指定）
  */
-static auto getColor = [&](uint8_t x,uint8_t y) -> uint8_t {
-    return(mKeyColor[y][x]);
+static auto getColorOn = [&](uint8_t x,uint8_t y) -> uint8_t {
+    return(mKeyColorOn[y][x]);
 };
 
+/*****************
+ * 指定位置のカラー定数を返す(OFF)
+ * @param x     座標(x) → 0～7
+ * @param y     座標(y) → 0～1（相対位置で指定）
+ */
+static auto getColorOff = [&](uint8_t x,uint8_t y) -> uint8_t {
+    return(mKeyColorOff[y][x]);
+};
 
+/*****************
+ * コードキー設定
+ * @param note
+ */
+static auto setCode = [&](uint8_t note){
+    // 0 ～ 11 に丸める
+    uint8_t octNote = note % 12;
+    mCodeMap |= (0x01 << octNote);
+};
+/*****************
+ * コードキー確認
+ * @param note
+ */
+static auto isCode = [&](uint8_t note) -> bool {
+    // 0 ～ 11 に丸める
+    uint8_t octNote = note % 12;
+    return( 0 < (mCodeMap & (0x01 << octNote)));
+};
+/*****************
+ * コード設定有無（ない場合にteue)
+ */
+static auto isNoCode = [&]() -> bool {
+    return(mCodeMap == 0);
+};
+/*****************
+ * コードキークリア
+ */
+static auto crearCode = [&](){
+    mCodeMap = 0;
+};
+
+/***********************************************************************
+ * keyMap 処理①
+ ***********************************************************************/
+/*****************
+ * keyMap追加
+ * @param note
+ */
+static auto isOnNote = [&](uint8_t note) -> bool {
+    // keyに値が含まれている事を確認
+    return(0 < mKeyMap.count(note));
+};
+
+/*****************
+ * 色取得
+ * @param note
+ * @param x 
+ * @param y 
+ */
+static auto getColor = [&](uint8_t note,uint8_t x,uint8_t y){
+
+    // 何も無いところは黒で埋める
+    uint8_t color = KEY_ZO;
+    // 色
+    if(isOnNote(note)){
+        // note が押されていたら赤を設定
+        color = LP3C_RED;
+    } else if(isNoCode()){
+        // コード設定がない場合
+        color = getColorOn(x,y);
+    } else if(isCode(note)){
+        // コード設定があり、コードあり
+        color = getColorOn(x,y);
+    } else {
+        // コード設定なし、コード範囲外
+        color = getColorOff(x,y);
+    }
+    return(color);
+};
 
 /***********************************************************************
  * 描画処理１
@@ -160,7 +258,7 @@ static auto drowKey2 = [&](uint8_t note,bool second,uint8_t value){
     uint8_t x = mTblNote2KeyX[tmpNote];
     uint8_t y = mTblNote2KeyY[tmpNote];
     // 色
-    uint8_t color = (0 == value) ? getColor(x,y) : LP3C_RED;
+    uint8_t color = getColor(note,x,y);
 
     // 位置補正
     // 描画位置 + key1段目 + （あれば）Key2段目
@@ -188,16 +286,8 @@ static auto drowKey = [&](uint8_t note,uint8_t value){
 };
 
 /***********************************************************************
- * keyMap 処理
+ * keyMap 処理②
  ***********************************************************************/
-/*****************
- * keyMap追加
- * @param note
- */
-static auto isOnNote = [&](uint8_t note) -> bool {
-    // keyに値が含まれている事を確認
-    return(0 < mKeyMap.count(note));
-};
 /*****************
  * keyMap追加
  * @param note
@@ -329,7 +419,7 @@ static auto memoryDelete = [&](uint8_t x){
 };
 
 /***********************************************************************
- * 描画処理２
+ * 描画処理２（鍵盤一個分）
  ***********************************************************************/
 /*****************
  * メモリーreDrow部分
@@ -352,14 +442,14 @@ static auto reDrowKey2 = [&](uint8_t octave,uint8_t locY){
         uint8_t baseNote = octave * 12;
         for(int x=0;x<LP3_maxXY;x++){
             // 何も無いところは黒で埋める
-            uint8_t color = KEY_Z;
+            uint8_t color = KEY_ZO;
             // 対称位置のノートを取得            
             int tmpNote = mTblKey2Note[y][x];
             if(0 <= tmpNote){
                 // note計算
                 uint8_t note = (uint8_t)tmpNote + baseNote;
                 // 色
-                color = (isOnNote(note)) ? LP3C_RED : getColor(x,y);
+                color = getColor(note,x,y);
             }
             // 描画
             Lp3::addDot(mpDispLp3,LP3B_NOMAL,x,locY + y,color);
@@ -387,8 +477,12 @@ static auto reDrowFunc = [&](){
     // クリア
     Lp3::addDot(mpDispLp3,LP3B_NOMAL,LP3_maxXY,LOCATE_Y+0,CL_MEMORY_CLR);
     // カーソル
-    Lp3::addDot(mpDispLp3,LP3B_NOMAL,LP3_maxXY,LOCATE_Y+1,CL_CURSOR_UP);
-    Lp3::addDot(mpDispLp3,LP3B_NOMAL,LP3_maxXY,LOCATE_Y+2,CL_CURSOR_DOWN);
+    uint8_t color = CL_CURSOR_NOMAL;    // 設定したい色
+    if(mStatus == ST_CODESET){
+        color = CL_CURSOR_CODESET;
+    }
+    Lp3::addDot(mpDispLp3,LP3B_NOMAL,LP3_maxXY,LOCATE_Y+1,color);
+    Lp3::addDot(mpDispLp3,LP3B_NOMAL,LP3_maxXY,LOCATE_Y+2,color);
 
     if(mSecondKey){
         // ２段目（空で描画する）
@@ -563,7 +657,41 @@ static auto pushMemoryClear = [&](uint8_t value){
 };
 
 /*****************
- * keyボタンクリック
+ * ステータス設定
+ * @param status 変更するステータス
+ */
+static auto setStatus = [&](uint8_t status){
+
+    // ステータス変更
+    mStatus = status;
+
+    // コード設定時に、設定済みの値をクリア
+    if(status == ST_CODESET){
+        crearCode();
+    }
+
+    // オクターブボタン描画
+    reDrowFunc();
+};
+
+/***********************************************************************
+* モード変更ボタンを3秒押しっぱなし→コード設定モードに
+ ***********************************************************************/
+static auto changeMode2CodeSet = [&](){
+    // コード設定モード
+    setStatus(ST_CODESET);
+    // タイマ割り込み中は、自動送信されないのでLaunchPadへの送信を行う
+    outLaunchPad();
+};
+/*********************************************
+* 割り込みイベント
+**********************************************/
+// LaunchPadの初期表示
+static auto timerModeChange = Midiglue::make_oneshot_us_event<>(changeMode2CodeSet);
+
+
+/*****************
+ * 右側のボタンクリック
  * @param y 押されたボタンのy軸(0～6)
  * @param value value値
  */
@@ -576,13 +704,22 @@ static auto pushFunc = [&](uint8_t y,uint8_t value){
 
     // オクターブはon時のみ
     if(0 < value){
+        // コード設定モード解除
+        if(mStatus != ST_KEY){  setStatus(ST_KEY);  }
+
+        // オクターブキー
         if(1==y) {
             pushOctaveUp();
+            // ボタンを3秒以上押しっぱなしを判定するためのタイマーをセット
+            timerModeChange->schedule(3000 * 1000);
             return;
         } else if(2==y){
             pushOctaveDown();
             return;
         }
+    } else {
+        // タイマキャンセル
+        timerModeChange->cancel();
     }
 };
 
@@ -638,8 +775,12 @@ static auto inputMidi = [&](MidiPacket packet){
         return;
     }
 
-    // noteに合わせて色のを変える
+    // noteに合わせて色を変える
     uint8_t note = (uint8_t) packet.getNoteNumber();
+    // CODESET設定
+    if(mStatus == ST_CODESET){
+        setCode(note);
+    }
     drowKey(note,packet.isNoteOn() ? 100 : 0);
 };
 
