@@ -12,6 +12,7 @@ input Int : 設定モード入力(Bang受け)
 output MidiPacket : proglam change出力
 output IntList : 描画情報。lpControlへの接続します。
 output String : ステータス情報を出力します。
+output Int : link muteDigitakt(extendMuteイネーブル)
 
 <Description>
 LaunchPad上に、プログラムチェンジ用の画面を表示、押した場所に対応するプログラムを送ります。
@@ -70,14 +71,14 @@ static const uint8_t mColor_base[8] = {
 };
 // プログラム識別用の色(データあり)
 static const uint8_t mColor_light[8] = {
-    LP3C_L_RED,
-    LP3C_L_GBLUE,
-    LP3C_L_YELLOW,
-    LP3C_L_PINK,
-    LP3C_L_LGREEN,
-    LP3C_L_BLUE,
-    LP3C_L_PURPLE,
-    LP3C_L_LBLUE
+    LP3C_RED,
+    LP3C_GBLUE,
+    LP3C_YELLOW,
+    LP3C_PINK,
+    LP3C_LGREEN,
+    LP3C_BLUE,
+    LP3C_PURPLE,
+    LP3C_LBLUE
 };
 // プログラム識別用の色(fillIn:1Bar)
 static const uint8_t mColor_fill1[8] = {
@@ -92,14 +93,14 @@ static const uint8_t mColor_fill1[8] = {
 };
 // プログラム識別用の色(fillIn：2Bar)
 static const uint8_t mColor_fill2[8] = {
-    LP3C_L_ORANGE,
-    LP3C_L_ORANGE,
-    LP3C_L_ORANGE,
-    LP3C_L_ORANGE,
-    LP3C_L_ORANGE,
-    LP3C_L_ORANGE,
-    LP3C_L_ORANGE,
-    LP3C_L_ORANGE
+    LP3C_L_RED,
+    LP3C_L_GBLUE,
+    LP3C_L_YELLOW,
+    LP3C_L_PINK,
+    LP3C_L_LGREEN,
+    LP3C_L_BLUE,
+    LP3C_L_PURPLE,
+    LP3C_L_LBLUE
 };
 
 
@@ -340,8 +341,6 @@ static auto reDrow = [&](){
 
 /*****************
  * Launch pad への送信
- * @param data  出力したい描画情報
- * @param y 押されたボタンのy軸(0～1)
  */
 static auto outLaunchPad = [&](){
     if(lpEnable)
@@ -349,6 +348,23 @@ static auto outLaunchPad = [&](){
         // 出力
         out1 = mpDispLp3;
     }
+};
+
+/*****************
+ * バンク内下段のプログラム確認
+ * @param prgNo  プログラムNo
+ */
+static auto isFillPattern = [&](uint8_t prgNo) -> bool {
+    return((prgNo % 16) >= 8 );
+};
+
+/*****************
+ * programChange送信
+ * @param value value値
+ */
+static auto sendProgramchange = [&](uint8_t prgNo){
+    auto packet = MidiPacket::makeProgramChange(MIDI_CH, prgNo);
+    out0 = packet;
 };
 
 /***********************************************************************
@@ -367,7 +383,7 @@ static auto initDrow = [&](){
 // 入力：プログラムチェンジ
 static auto inputPrgChange = [&](uint8_t prgNo){
 
-    // 
+    // 次のprogramNo
     mSettingPrgNo = 0xff;    
 
     // program No の変更
@@ -377,6 +393,16 @@ static auto inputPrgChange = [&](uint8_t prgNo){
     // Launch Pad描画
     drowProglamNo(oldPrgNo);
     drowProglamNo(mNowPrgNo);
+
+    // todo:次のパターンに速攻で移動してしまうので、タイマによる設定が必要。
+    // // 下段のパターンに遷移した場合、自動で次のパターン（右上）を選択する
+    // // ただし、一番右のパターンでは無効（移動先が無いため）
+    // if(isFillPattern(mNowPrgNo) && not(mNowPrgNo % 8 == 7)) {
+    //     mSettingPrgNo = mNowPrgNo - 7;
+    //     drowProglamNo(mSettingPrgNo);
+    //     sendProgramchange(mSettingPrgNo);
+    // }
+
 };
 
 /*****************
@@ -438,14 +464,25 @@ static auto inputScrool = [&](int vactor) -> bool {
 
 
 /*****************
- * programChange送信
- * @param value value値
+ * link muteDigitakt送信
  */
-static auto sendProgramchange = [&](uint8_t prgNo){
-    auto packet = MidiPacket::makeProgramChange(MIDI_CH, prgNo);
-    out0 = packet;
-};
+static auto updateExMuteEnable = [&](uint8_t oldPrgNo,uint8_t newPrgNo){
 
+    if(oldPrgNo == newPrgNo)
+    {   return; }
+
+    // 下段から、上段に移動するときはミュートディセーブルにする
+    if(isFillPattern(oldPrgNo) && (newPrgNo == oldPrgNo-8)){
+        // ディセーブル
+        // Midiglue::Debug::write_log("desable!");
+        out3 = 0;
+    }
+    else {
+        // イネーブル
+        // Midiglue::Debug::write_log("enable!");
+        out3 = 1;
+    }
+};
 
 
 /****************
@@ -506,6 +543,7 @@ static auto inputProgramChange = [&](uint8_t x,uint8_t y,uint8_t value){
         drowProglamNo(mSettingPrgNo);
         // midi outへの出力
         if(!${LinkBarGage}){
+            updateExMuteEnable(mNowPrgNo,mSettingPrgNo);
             sendProgramchange(mSettingPrgNo);
         }
     }
@@ -626,17 +664,17 @@ static auto initPrgStateMap = [&](){
     crearPrgStateMap();
     setStatus(ST_IDOL);
 
-    // 色テスト用
-    uint8_t i = 0;
-    for(i=0;i<SCROOL_MAX;i++) {
-        mPrgStateMap[i][1] = PRGST_SET;
-    }
-    for(i=0;i<SCROOL_MAX;i++) {
-        mPrgStateMap[i][3] = PRGST_FILL1;
-    }
-    for(i=0;i<SCROOL_MAX;i++) {
-        mPrgStateMap[i][5] = PRGST_FILL2;
-    }
+    // // 色テスト用
+    // uint8_t i = 0;
+    // for(i=0;i<SCROOL_MAX;i++) {
+    //     mPrgStateMap[i][1] = PRGST_SET;
+    // }
+    // for(i=0;i<SCROOL_MAX;i++) {
+    //     mPrgStateMap[i][3] = PRGST_FILL1;
+    // }
+    // for(i=0;i<SCROOL_MAX;i++) {
+    //     mPrgStateMap[i][5] = PRGST_FILL2;
+    // }
 };
 
 /*********************************************
@@ -678,6 +716,7 @@ else if (@in3) { // varGageBoxからの入力
     // midi outへの出力
     if(${LinkBarGage} && (in3 == 2)){
         sendProgramchange(mSettingPrgNo);
+        updateExMuteEnable(mNowPrgNo,mSettingPrgNo);
 
         // program No の変更
         uint8_t oldPrgNo = mNowPrgNo;

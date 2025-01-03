@@ -12,6 +12,7 @@ kokou ni-sui@sabaco
 <I/O>
 input MidiPacket : MIDI入力（Digitakt）
 input IntList : mute処理情報(muteBox)
+input Int : Extend Mute enable(1 = enable)
 output MidiPacket : MIDI出力(Digitakt)
 output IntList : mute処理情報(muteBox)
 
@@ -60,6 +61,8 @@ static const uint8_t tblBitRev[] = {
 static IntList pOutList = Midiglue::init_default<IntList>();
 // 現在のMuteステータス
 static uint8_t muteStatus[2];
+// 現在のMuteステータス
+static bool mEnableExtendMute = true;
 
 
 /*****************
@@ -191,6 +194,11 @@ static auto updateMuteMapSingle = [&](uint8_t* target,uint8_t cc,uint8_t value){
  * ※呼び出す前に、チャンネルのチェックは済ませて下さい。
  */
 static auto inputExtendMutePacket = [&](MidiPacket packet){
+
+    // イネーブルチェック
+    if(!mEnableExtendMute) {
+        return;
+    }
     uint8_t value = packet.getControlValue();
     uint8_t cc = packet.getControlNumber();
 
@@ -251,8 +259,8 @@ static auto inputCcPacket = [&](MidiPacket packet){
 
     // Extend mute CC処理
     if(packet.getChannel() == ${ExtendMuteCh} ){
-        Midiglue::Debug::write_log("ch", packet.getChannel());
-        Midiglue::Debug::write_log("CC", packet.getControlNumber());
+        // Midiglue::Debug::write_log("ch", packet.getChannel());
+        // Midiglue::Debug::write_log("CC", packet.getControlNumber());
         inputExtendMutePacket(packet);
     }
     else {
@@ -290,4 +298,8 @@ if(@setup){
     muteData[1] = in1->at(1);
     // mute送信
     extendMute(flgRefresh,muteData);
+}else if(@in2) {
+    mEnableExtendMute = (in2 != 0);
+    Midiglue::Debug::write_log("mEnableExtendMute!",mEnableExtendMute);
+
 }

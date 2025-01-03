@@ -49,17 +49,17 @@ static const uint8_t MEMORYCOLORS[MCOLOR_MAX] = {
 };
 
 // キーボード描画用(ON)
-static const uint8_t KEY_ZO = LP3C_BLACK;        // キー（なし）
-static const uint8_t KEY_AO = LP3C_PURPLE;       // メジャーキー
-static const uint8_t KEY_BO = LP3C_I_PURPLE;     // マイナーキー
-static const uint8_t KEY_CO = LP3C_L_PURPLE;     // Cキー
-static const uint8_t KEY_PO = LP3C_RED;          // 押されたキー
+static const uint8_t KEY_ZO = LP3C_BLACK;       // キー（なし）
+static const uint8_t KEY_AO = LP3C_PURPLE;      // メジャーキー
+static const uint8_t KEY_BO = LP3C_I_PURPLE;    // マイナーキー
+static const uint8_t KEY_CO = LP3C_L_PURPLE;    // Cキー
+static const uint8_t KEY_PO = LP3C_RED;         // 押されたキー
 
 // キーボード描画用(OFF)
-static const uint8_t KEY_ZF = LP3C_BLACK;        // キー（なし）
-static const uint8_t KEY_AF = LP3C_DK_GLAY;       // メジャーキー
+static const uint8_t KEY_ZF = LP3C_BLACK;       // キー（なし）
+static const uint8_t KEY_AF = LP3C_DK_GLAY;     // メジャーキー
 static const uint8_t KEY_BF = LP3C_DK_GLAY;     // マイナーキー
-static const uint8_t KEY_CF = LP3C_LGT_GLAY;     // Cキー
+static const uint8_t KEY_CF = LP3C_LGT_GLAY;    // Cキー
 
 // CodeMemoryのメモリ最大
 static const uint8_t MAX_MEMORY = 4;
