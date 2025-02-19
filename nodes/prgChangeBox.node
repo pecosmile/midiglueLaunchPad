@@ -8,7 +8,6 @@ input Int : LaunchPad制御（0=Disable）
 input MidiPacket : proglam change入力
 input MidiPacket : launchpadからの入力
 input Int : プログラムチェンジタイミング(10を受けるとプログラムチェンジ)
-input Int : 設定モード入力(Bang受け)
 output MidiPacket : proglam change出力
 output IntList : 描画情報。lpControlへの接続します。
 output String : ステータス情報を出力します。
@@ -82,14 +81,14 @@ static const uint8_t mColor_light[8] = {
 };
 // プログラム識別用の色(fillIn:1Bar)
 static const uint8_t mColor_fill1[8] = {
-    LP3C_BPURPLE,
-    LP3C_BPURPLE,
-    LP3C_BPURPLE,
-    LP3C_BPURPLE,
-    LP3C_BPURPLE,
-    LP3C_BPURPLE,
-    LP3C_BPURPLE,
-    LP3C_BPURPLE
+    LP3C_ORANGE,
+    LP3C_ORANGE,
+    LP3C_ORANGE,
+    LP3C_ORANGE,
+    LP3C_ORANGE,
+    LP3C_ORANGE,
+    LP3C_ORANGE,
+    LP3C_ORANGE
 };
 // プログラム識別用の色(fillIn：2Bar)
 static const uint8_t mColor_fill2[8] = {
@@ -119,7 +118,7 @@ static const uint8_t CL_PG_INPUT     = LP3C_L_BROWN;
 
 // ステータス
 static const uint8_t ST_IDOL = 0;       // IDOL
-static const uint8_t ST_WAIT = 1;       // プログラム変更待ち
+static const uint8_t ST_PLAY = 1;       // 再生中
 static const uint8_t ST_PG_WAIT = 10;   // セッティング(wait)
 static const uint8_t ST_PG_INPUT = 11;  // セッティング(入力中)
 
@@ -144,8 +143,6 @@ static uint8_t mScrool = 0;
 static uint8_t mNowPrgNo = 0xff;
 // 指定したプログラムNo
 static uint8_t mSettingPrgNo = 0xff;
-// 古いプログラムNo
-static uint8_t mOldPrgNo = 0xff;
 
 // カウント
 static uint8_t mClockCount = 0;
@@ -179,7 +176,6 @@ static auto checkOfRangeIn = [&](uint8_t y) -> bool {
         return(false);
     }
     return(true);
-
 };
 
 // メモリ初期化
@@ -194,12 +190,13 @@ static auto crearPrgStateMap = [&](){
     }
 };
 
-// 指定した段の色を返す
+// 指定した位置の色を返す
 static auto getBaseColor = [&](uint8_t x,uint8_t y)-> uint8_t {
 
     // 設定したい色
     uint8_t color = LP3C_BLACK;
     // ステータスによって色を設定
+    // 2段ごと（16ごと）に色を変える
     switch(mPrgStateMap[y][x]){
         case PRGST_SET:
             color = mColor_light[y/2];
@@ -215,7 +212,6 @@ static auto getBaseColor = [&](uint8_t x,uint8_t y)-> uint8_t {
         break;
     }
 
-    // 2段ごと（16ごと）に色を変える
     return(color);
 };
 
@@ -266,6 +262,7 @@ static auto drowProglamNo = [&](uint8_t prgNo) {
 
 /*****************
  * モードボタン描画
+ * 通常モード→パターン描画モードの変更
  */
 static auto drowModeButton = [&](){
 
@@ -277,9 +274,6 @@ static auto drowModeButton = [&](){
     // 色の決定
     uint8_t color = CL_MODE_IDOL;
     switch(mStatus){
-        case ST_WAIT:
-            color = CL_MODE_WAIT;
-        break;
         case ST_PG_WAIT:
             color = CL_PG_WAIT;
         break;
@@ -288,7 +282,6 @@ static auto drowModeButton = [&](){
         break;
     };
 
-    // 縦が3以上の場合のみ描画
     Lp3::addDot(mpDispLp3,LP3B_NOMAL,8,LOCATE_Y + 2,color);
 
 };
@@ -353,11 +346,15 @@ static auto outLaunchPad = [&](){
 /*****************
  * バンク内下段のプログラム確認
  * @param prgNo  プログラムNo
+ * プログラムの下段をFillパターンとして判定
  */
 static auto isFillPattern = [&](uint8_t prgNo) -> bool {
     return((prgNo % 16) >= 8 );
 };
 
+/***********************************************************************
+* programChange系関数
+ ***********************************************************************/
 /*****************
  * programChange送信
  * @param value value値
@@ -366,6 +363,14 @@ static auto sendProgramchange = [&](uint8_t prgNo){
     auto packet = MidiPacket::makeProgramChange(MIDI_CH, prgNo);
     out0 = packet;
 };
+
+/*****************
+ * programChangeのDelay送信
+ */
+static auto prgChangeDelay = [&](){
+    sendProgramchange(mSettingPrgNo);
+};
+
 
 /***********************************************************************
 * 初期化処理
@@ -380,28 +385,50 @@ static auto initDrow = [&](){
 };
 
 
+
+/*********************************************
+* 割り込みイベント
+**********************************************/
+// LaunchPadの初期表示
+static auto initEvent = Midiglue::make_oneshot_us_event<>(initDrow);
+
+// programChangeをDelayさせるためのタイマ
+static auto prgChangeEvent = Midiglue::make_oneshot_us_event<>(prgChangeDelay);
+
+
+
 // 入力：プログラムチェンジ
 static auto inputPrgChange = [&](uint8_t prgNo){
 
-    // 次のprogramNo
+    // mSettingPrgNoの位置が上書き対象でない（入力されたプログラムチェンジと違う）
+    // 場合、mSettingPrgNoの描画を先に削除する。
+    uint8_t tmpPrgNo = mSettingPrgNo;
     mSettingPrgNo = 0xff;    
+    if(tmpPrgNo != prgNo){
+        drowProglamNo(tmpPrgNo);
+    }
 
     // program No の変更
-    uint8_t oldPrgNo = mNowPrgNo;
+    tmpPrgNo = mNowPrgNo;
     mNowPrgNo = prgNo;
 
     // Launch Pad描画
-    drowProglamNo(oldPrgNo);
+    drowProglamNo(tmpPrgNo);
     drowProglamNo(mNowPrgNo);
 
-    // todo:次のパターンに速攻で移動してしまうので、タイマによる設定が必要。
-    // // 下段のパターンに遷移した場合、自動で次のパターン（右上）を選択する
-    // // ただし、一番右のパターンでは無効（移動先が無いため）
-    // if(isFillPattern(mNowPrgNo) && not(mNowPrgNo % 8 == 7)) {
-    //     mSettingPrgNo = mNowPrgNo - 7;
-    //     drowProglamNo(mSettingPrgNo);
-    //     sendProgramchange(mSettingPrgNo);
-    // }
+    // 再生中に、下段のパターンに遷移した場合、自動で次のパターン（右上）を選択する
+    // ただし、一番右のパターンでは無効（移動先が無いため）
+    if(
+        mStatus == ST_PLAY               // 再生中
+        && isFillPattern(mNowPrgNo)     // 下段パターン
+        && not(mNowPrgNo % 8 == 7)      // 一番右のパターン以外
+    ) {
+        // 右上のパターンに遷移する
+        mSettingPrgNo = mNowPrgNo - 7;
+        drowProglamNo(mSettingPrgNo);
+        // 0.2秒後にプログラムチェンジを呼び出す
+        prgChangeEvent->schedule(200 * 1000);
+    }
 
 };
 
@@ -471,17 +498,8 @@ static auto updateExMuteEnable = [&](uint8_t oldPrgNo,uint8_t newPrgNo){
     if(oldPrgNo == newPrgNo)
     {   return; }
 
-    // 下段から、上段に移動するときはミュートディセーブルにする
-    if(isFillPattern(oldPrgNo) && (newPrgNo == oldPrgNo-8)){
-        // ディセーブル
-        // Midiglue::Debug::write_log("desable!");
-        out3 = 0;
-    }
-    else {
-        // イネーブル
-        // Midiglue::Debug::write_log("enable!");
-        out3 = 1;
-    }
+    // 下段パターンから、上段のパターンに移動するときはミュート処理をしない。
+    out3 = (isFillPattern(oldPrgNo) && (newPrgNo == oldPrgNo-8)) ? 0:1;
 };
 
 
@@ -489,7 +507,7 @@ static auto updateExMuteEnable = [&](uint8_t oldPrgNo,uint8_t newPrgNo){
  * Bang入力
  * @param flgNoWait PG_WAITを即時実行するフラグ（bang処理)
  */
-static auto inputBang = [&](bool flgNoWait){
+static auto inputModeChange = [&](bool flgNoWait){
 
     // ステータスがノーマルの場合は、セッティングモードに変更
     if(mStatus < ST_PG_WAIT){
@@ -505,6 +523,7 @@ static auto inputBang = [&](bool flgNoWait){
             timerModeChange->schedule(3000 * 1000);
         }
     } else {
+        // 既にセッティングモードの時は元に戻す
         // Midiglue::Debug::write_log("bang ST_IDOL");
         setStatus(ST_IDOL);
         reDrow();
@@ -553,7 +572,7 @@ static auto inputProgramChange = [&](uint8_t x,uint8_t y,uint8_t value){
         // モード切替
         if(y==2) {
             // ボタンを押した時はタイマースタート、離した時はキャンセル
-            if(0<value){    inputBang(false);    }
+            if(0<value){    inputModeChange(false);    }
             else{           timerModeChange->cancel(); }
         } else if(0<value){
             // スクロール
@@ -588,6 +607,13 @@ static auto inputMidiNomal = [&](MidiPacket packet){
     if (Midiglue::is_valid(packet) && MIDI_CH == packet.getChannel() && packet.isProgramChange()){
         inputPrgChange(packet.getProgramNumber());
     }
+    else if(packet == START || packet == CONTINUE) {
+        setStatus(ST_PLAY);
+    }
+    else if(packet == STOP){
+        setStatus(ST_IDOL);
+    }
+
 };
 
 // 入力：プログラムデータ設定.クロック制御
@@ -677,11 +703,6 @@ static auto initPrgStateMap = [&](){
     // }
 };
 
-/*********************************************
-* 割り込みイベント
-**********************************************/
-// LaunchPadの初期表示
-static auto initEvent = Midiglue::make_oneshot_us_event<>(initDrow);
 
 /*********************************************
 * 実行処理
@@ -725,9 +746,6 @@ else if (@in3) { // varGageBoxからの入力
         drowProglamNo(oldPrgNo);
         drowProglamNo(mNowPrgNo);
     }
-}
-else if (@in4) { // bang受け
-    inputBang(true);
 }
 
 // バッファがあればlaunchpadに送信
