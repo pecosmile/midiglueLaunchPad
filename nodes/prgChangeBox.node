@@ -41,8 +41,10 @@ static const uint8_t BOXSIZE_Y = ${Height}; // サイズ（縦）
 static const uint8_t MIDI_CH = ${Channel};  // チャンネル
 static const uint8_t SCROOL_MAX = 16;  // スクロールの最大値(8*16)
 
-static const uint8_t SCROOL_UP = LP3K_UP;       // スクロール：上
-static const uint8_t SCROOL_DOWN = LP3K_DOWN;   // スクロール：下
+// 右側[>]の位置
+static const uint8_t SCRKEY_UP = 0;         // スクロールキー：上
+static const uint8_t SCRKEY_DOWN = 1;       // スクロールキー：下
+
 
 // プログラムのステータス
 static const uint8_t PRGST_BLANK = 0;       // 空
@@ -107,20 +109,17 @@ static const uint8_t mColor_fill2[8] = {
 static const uint8_t CL_NOW = LP3C_WHITE;
 // 色：選択中プログラム
 static const uint8_t CL_SETTING = LP3C_BPURPLE;
-// 色：上下カーソル
-static const uint8_t CL_CURSOR_UP   = LP3C_L_YELLOW;
-static const uint8_t CL_CURSOR_DOWN = LP3C_L_YELLOW;
-// 色：モード変更ボタン
-static const uint8_t CL_MODE_IDOL    = LP3C_BGREEN;
-static const uint8_t CL_MODE_WAIT    = LP3C_D_BLUE;
-static const uint8_t CL_PG_WAIT      = LP3C_RED;
-static const uint8_t CL_PG_INPUT     = LP3C_L_BROWN;
+// 色：カーソル(通常、色読込、色編集)
+static const uint8_t CL_CURSOR_IDOL         = LP3C_L_YELLOW;
+static const uint8_t CL_CURSOR_LOAD_WAIT    = LP3C_L_BLUE;
+static const uint8_t CL_CURSOR_LOAD_INPUT   = LP3C_D_RED;
+static const uint8_t CL_CURSOR_CLR_EDIT     = LP3C_L_LGREEN;
 
 // ステータス
-static const uint8_t ST_IDOL = 0;       // IDOL
-static const uint8_t ST_PLAY = 1;       // 再生中
-static const uint8_t ST_PG_WAIT = 10;   // セッティング(wait)
-static const uint8_t ST_PG_INPUT = 11;  // セッティング(入力中)
+static const uint8_t ST_IDOL       = 0;     // IDOL
+static const uint8_t ST_PLAY       = 1;     // 再生中
+static const uint8_t ST_LORD_WAIT  = 10;    // セッティング(wait)
+static const uint8_t ST_LORD_INPUT = 11;    // セッティング(入力中)
 
 // 1ステップ/クロック
 static const uint8_t CLOCK4STEP = 6;
@@ -138,6 +137,8 @@ static String mStrStatus = Midiglue::make_string("IDLE");
 
 // スクロール位置
 static uint8_t mScrool = 0;
+// [>]の最後に押された位置
+static uint8_t mScrKey = 0;
 
 // 現在のプログラムNo
 static uint8_t mNowPrgNo = 0xff;
@@ -261,28 +262,35 @@ static auto drowProglamNo = [&](uint8_t prgNo) {
 };
 
 /*****************
- * モードボタン描画
- * 通常モード→パターン描画モードの変更
+ * カーソルボタン描画
+ * モードによって色を変える
  */
-static auto drowModeButton = [&](){
+static auto drowCursorButton = [&](){
 
-    // 縦が3以上の場合のみ描画
-    if(BOXSIZE_Y < 3){
-        return;
-    }
 
     // 色の決定
-    uint8_t color = CL_MODE_IDOL;
+    uint8_t color = CL_CURSOR_IDOL;
     switch(mStatus){
-        case ST_PG_WAIT:
-            color = CL_PG_WAIT;
+        case ST_IDOL:
+        case ST_PLAY:
+            color = CL_CURSOR_IDOL;
         break;
-        case ST_PG_INPUT:
-            color = CL_PG_INPUT;
+        case ST_LORD_WAIT:
+            color = CL_CURSOR_LOAD_WAIT;
+        break;
+        case ST_LORD_INPUT:
+            color = CL_CURSOR_LOAD_INPUT;
         break;
     };
 
-    Lp3::addDot(mpDispLp3,LP3B_NOMAL,8,LOCATE_Y + 2,color);
+    // カーソル
+    Lp3::addDot(mpDispLp3,LP3B_NOMAL,8,LOCATE_Y + SCRKEY_UP  ,color);
+    Lp3::addDot(mpDispLp3,LP3B_NOMAL,8,LOCATE_Y + SCRKEY_DOWN,color);
+
+    // 外側を黒で塗る
+    for(int y = SCRKEY_DOWN+1 ;y<BOXSIZE_Y;y++){
+        Lp3::addDot(mpDispLp3,LP3B_NOMAL,8,LOCATE_Y + y,LP3C_BLACK);
+    }
 
 };
 
@@ -314,17 +322,8 @@ static auto reDrow = [&](){
             ++prgNo;
         }
     }
-    // カーソル
-    Lp3::addDot(mpDispLp3,LP3B_NOMAL,8,LOCATE_Y + 0,CL_CURSOR_UP);
-    Lp3::addDot(mpDispLp3,LP3B_NOMAL,8,LOCATE_Y + 1,CL_CURSOR_DOWN);
-
-    // モード変更ボタン
-    drowModeButton();
-
-    // 外側を黒で塗る
-    for(int y=3;y<BOXSIZE_Y;y++){
-        Lp3::addDot(mpDispLp3,LP3B_NOMAL,8,LOCATE_Y + y,LP3C_BLACK);
-    }
+    // カーソルボタン描画
+    drowCursorButton();
     
 };
 
@@ -441,31 +440,35 @@ static auto setStatus = [&](uint8_t status){
     // ステータス変更
     mStatus = status;
 
-    // モード変更ボタン描画
-    drowModeButton();
+    // カーソルボタン描画
+    drowCursorButton();
 
     // ステータス出力
     static String msg;
-    if(status < ST_PG_WAIT){
+    if(status < ST_LORD_WAIT){
         msg = Midiglue::make_string("IDLE");    
-    } else if(status == ST_PG_WAIT){
+    } else if(status == ST_LORD_WAIT){
         msg = Midiglue::make_string("wait data");
-    } else if(status == ST_PG_INPUT){
+    } else if(status == ST_LORD_INPUT){
         msg = Midiglue::make_string("input now...");
     }
     out2 = msg;
 };
 
 /***********************************************************************
-* モード変更ボタンを3秒押しっぱなし→wait dataに
+* カーソルボタン描画を3秒押しっぱなし
  ***********************************************************************/
 static auto changeMode2Wait = [&](){
-    // メモリ内容を全て初期化する。
-    crearPrgStateMap();
-    // セッティング(wait)
-    setStatus(ST_PG_WAIT);
-    // タイマ割り込み中は、自動送信されないのでLaunchPadへの送信を行う
-    outLaunchPad();
+
+    if(mScrKey == SCRKEY_DOWN){
+        // 下を押した場合（色読み込みモード）
+        // メモリ内容を全て初期化する。
+        crearPrgStateMap();
+        // セッティング(wait)
+        setStatus(ST_LORD_WAIT);
+        // タイマ割り込み中は、自動送信されないのでLaunchPadへの送信を行う
+        outLaunchPad();
+    }
 };
 /*********************************************
 * 割り込みイベント
@@ -502,34 +505,6 @@ static auto updateExMuteEnable = [&](uint8_t oldPrgNo,uint8_t newPrgNo){
     out3 = (isFillPattern(oldPrgNo) && (newPrgNo == oldPrgNo-8)) ? 0:1;
 };
 
-
-/****************
- * Bang入力
- * @param flgNoWait PG_WAITを即時実行するフラグ（bang処理)
- */
-static auto inputModeChange = [&](bool flgNoWait){
-
-    // ステータスがノーマルの場合は、セッティングモードに変更
-    if(mStatus < ST_PG_WAIT){
-        if(flgNoWait) {
-            // メモリ内容を全て初期化する。
-            crearPrgStateMap();
-            // Midiglue::Debug::write_log("bang ST_PG_WAIT");
-            // ステータスを即変更
-            setStatus(ST_PG_WAIT);
-        } else {
-            // Midiglue::Debug::write_log("start timer");
-            // ボタンを3秒以上押しっぱなしを判定するためのタイマーをセット
-            timerModeChange->schedule(3000 * 1000);
-        }
-    } else {
-        // 既にセッティングモードの時は元に戻す
-        // Midiglue::Debug::write_log("bang ST_IDOL");
-        setStatus(ST_IDOL);
-        reDrow();
-    }
-
-};
 
 /*****************
  * LaunchPadからの入力
@@ -570,14 +545,22 @@ static auto inputProgramChange = [&](uint8_t x,uint8_t y,uint8_t value){
         // y軸補正
         y -= LOCATE_Y;
         // モード切替
-        if(y==2) {
-            // ボタンを押した時はタイマースタート、離した時はキャンセル
-            if(0<value){    inputModeChange(false);    }
-            else{           timerModeChange->cancel(); }
-        } else if(0<value){
+        if(value == 0) {
+            // ボタンを離した時はタイマをキャンセルする。
+            // 右側全てでキャンセルになるけど、仕様とする
+            timerModeChange->cancel();
+        }
+        else
+        {
             // スクロール
-            if(y==0) { inputScrool(-1); }   // 上スクロール
-            if(y==1) { inputScrool(+1); }   // 下スクロール
+            if(y == SCRKEY_UP  ) { inputScrool(-1); }   // 上スクロール
+            if(y == SCRKEY_DOWN) { inputScrool(+1); }   // 下スクロール
+            // ボタンを3秒以上押しっぱなしを判定するためのタイマーをセット
+            if(mStatus < ST_LORD_WAIT){
+                timerModeChange->schedule(3000 * 1000);
+                mScrKey = y;
+            }
+
         }
     }
 
@@ -619,7 +602,7 @@ static auto inputMidiNomal = [&](MidiPacket packet){
 // 入力：プログラムデータ設定.クロック制御
 static auto inputMidiData = [&](MidiPacket packet){
     // init bung
-    if(packet == CLOCK && mStatus == ST_PG_INPUT){
+    if(packet == CLOCK && mStatus == ST_LORD_INPUT){
         // clock信号
         ++mClockCount;
         // 16step進んだ所で終了
@@ -632,7 +615,7 @@ static auto inputMidiData = [&](MidiPacket packet){
     else if(packet == START || packet == CONTINUE) {
         // Midiglue::Debug::write_log("ip:START");
         // ステータス設定（クリア）
-        setStatus(ST_PG_INPUT);
+        setStatus(ST_LORD_INPUT);
         mClockCount = 0;
     }
     else if(packet == STOP){
@@ -677,7 +660,7 @@ static auto inputMidiData = [&](MidiPacket packet){
 // 入力：grooveBox
 static auto inputMidi = [&](MidiPacket packet){
 
-    if(mStatus<ST_PG_WAIT){ // 通常ステータス
+    if(mStatus<ST_LORD_WAIT){ // 通常ステータス
         inputMidiNomal(packet);
     } else {
         inputMidiData(packet);
