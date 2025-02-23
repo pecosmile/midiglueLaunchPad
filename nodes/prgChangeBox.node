@@ -118,8 +118,10 @@ static const uint8_t CL_CURSOR_CLR_EDIT     = LP3C_L_LGREEN;
 // ステータス
 static const uint8_t ST_IDOL       = 0;     // IDOL
 static const uint8_t ST_PLAY       = 1;     // 再生中
-static const uint8_t ST_LORD_WAIT  = 10;    // セッティング(wait)
-static const uint8_t ST_LORD_INPUT = 11;    // セッティング(入力中)
+static const uint8_t ST_LORD_WAIT  = 10;    // 色読み込み（待ち）
+static const uint8_t ST_LORD_INPUT = 11;    // 色読み込み（処理中）
+static const uint8_t ST_CLR_MODE   = 20;    // 色編集モード
+static const uint8_t ST_CLR_OUTPUT = 21;    // 色編集（書き込み）
 
 // 1ステップ/クロック
 static const uint8_t CLOCK4STEP = 6;
@@ -281,6 +283,10 @@ static auto drowCursorButton = [&](){
         case ST_LORD_INPUT:
             color = CL_CURSOR_LOAD_INPUT;
         break;
+        case ST_CLR_MODE:
+        case ST_CLR_OUTPUT:
+            color = CL_CURSOR_CLR_EDIT;
+        break;
     };
 
     // カーソル
@@ -436,23 +442,10 @@ static auto inputPrgChange = [&](uint8_t prgNo){
  * @param status 変更するステータス
  */
 static auto setStatus = [&](uint8_t status){
-
     // ステータス変更
     mStatus = status;
-
     // カーソルボタン描画
     drowCursorButton();
-
-    // ステータス出力
-    static String msg;
-    if(status < ST_LORD_WAIT){
-        msg = Midiglue::make_string("IDLE");    
-    } else if(status == ST_LORD_WAIT){
-        msg = Midiglue::make_string("wait data");
-    } else if(status == ST_LORD_INPUT){
-        msg = Midiglue::make_string("input now...");
-    }
-    out2 = msg;
 };
 
 /***********************************************************************
@@ -460,15 +453,25 @@ static auto setStatus = [&](uint8_t status){
  ***********************************************************************/
 static auto changeMode2Wait = [&](){
 
-    if(mScrKey == SCRKEY_DOWN){
+    switch(mScrKey){
+    case SCRKEY_DOWN:
         // 下を押した場合（色読み込みモード）
         // メモリ内容を全て初期化する。
         crearPrgStateMap();
         // セッティング(wait)
         setStatus(ST_LORD_WAIT);
-        // タイマ割り込み中は、自動送信されないのでLaunchPadへの送信を行う
+        // タイマ割り込み中は色情報を自動送信されないのでLaunchPadへの送信を行う
         outLaunchPad();
+    break;
+    case SCRKEY_UP:
+        // 上を押した場合（色編集モード）
+        // セッティング(COLOREdit)
+        setStatus(ST_CLR_MODE);
+        // タイマ割り込み中は色情報を自動送信されないのでLaunchPadへの送信を行う
+        outLaunchPad();
+    break;
     }
+
 };
 /*********************************************
 * 割り込みイベント
@@ -495,6 +498,8 @@ static auto inputScrool = [&](int vactor) -> bool {
 
 /*****************
  * link muteDigitakt送信
+ * program変化によって、ミュート処理のon/offを切り替える
+ * （muteBoxに伝える）
  */
 static auto updateExMuteEnable = [&](uint8_t oldPrgNo,uint8_t newPrgNo){
 
@@ -506,29 +511,38 @@ static auto updateExMuteEnable = [&](uint8_t oldPrgNo,uint8_t newPrgNo){
 };
 
 
+static auto togglePrgSt = [&](uint8_t mode) -> uint8_t {
+
+    uint8_t ret = PRGST_BLANK;
+    switch(mode){
+    case PRGST_BLANK:    ret = PRGST_SET;    break;
+    case PRGST_SET:      ret = PRGST_FILL1;  break;
+    case PRGST_FILL1:    ret = PRGST_FILL2;  break;
+    case PRGST_FILL2:    ret = PRGST_BLANK;  break;
+    }
+    return(ret);
+};
+
+
 /*****************
- * LaunchPadからの入力
+ * programChange領域のクリック
  * @param x 押されたボタンのX軸(0～8)
  * @param y 押されたボタンのy軸(0～8)
  * @param value value値
  */
 static auto inputProgramChange = [&](uint8_t x,uint8_t y,uint8_t value){
-    // 入力不要
-    if(!lpEnable) { return; }
 
-    // Midiglue::Debug::write_log("inputProgramChange", x*10+y);
-
-    // boxの範囲内であることを確認(縦)
-    if(y < LOCATE_Y || y >= (LOCATE_Y + BOXSIZE_Y)){
+    // 離した時の処理は無効
+    if(value == 0){
         return;
     }
 
-    // boxの範囲内であることを確認(横)
-    if(x<LP3_maxXY){
-        // y軸補正
-        y += (mScrool - LOCATE_Y);
-        // progNo
-        uint8_t prgNo = x + y*LP3_maxXY;
+    // progNo
+    uint8_t prgNo = x + y*LP3_maxXY;
+
+    if(!(mStatus == ST_CLR_MODE || mStatus == ST_CLR_OUTPUT)){
+        // 色編集モード以外
+
         // program No の変更
         uint8_t oldPrgNo = mSettingPrgNo;
         mSettingPrgNo = prgNo;
@@ -540,28 +554,68 @@ static auto inputProgramChange = [&](uint8_t x,uint8_t y,uint8_t value){
             updateExMuteEnable(mNowPrgNo,mSettingPrgNo);
             sendProgramchange(mSettingPrgNo);
         }
+    } else {
+        // 色編集モード
+        mPrgStateMap[y][x] = togglePrgSt(mPrgStateMap[y][x]);
+        drowProglamNo(prgNo);
+    }
+
+};
+
+/*****************
+ * [>]が押された時の処理
+ * @param x 押されたボタンのX軸(0～8)
+ * @param y 押されたボタンのy軸(0～8)
+ * @param value value値
+ */
+static auto inputRightGrid = [&](uint8_t x,uint8_t y,uint8_t value){
+    // y軸補正
+    y -= LOCATE_Y;
+    // モード切替
+    if(value == 0) {
+        // ボタンを離した時はタイマをキャンセルする。
+        // 右側全てでキャンセルになるけど、仕様とする
+        timerModeChange->cancel();
+    } else {
+        // スクロール
+        if(y == SCRKEY_UP  ) { inputScrool(-1); }   // 上スクロール
+        if(y == SCRKEY_DOWN) { inputScrool(+1); }   // 下スクロール
+        // ボタンを3秒以上押しっぱなしを判定するためのタイマーをセット
+        if(mStatus == ST_IDOL){
+            timerModeChange->schedule(3000 * 1000);
+            mScrKey = y;
+        }
+    }
+
+};
+
+
+
+/*****************
+ * LaunchPadからの入力
+ * @param x 押されたボタンのX軸(0～8)
+ * @param y 押されたボタンのy軸(0～8)
+ * @param value value値
+ */
+static auto inputLaunchPadGrid = [&](uint8_t x,uint8_t y,uint8_t value){
+    // 入力不要
+    if(!lpEnable) { return; }
+
+    // Midiglue::Debug::write_log("inputLaunchPadGrid", x*10+y);
+
+    // boxの範囲内であることを確認(縦)
+    if(y < LOCATE_Y || y >= (LOCATE_Y + BOXSIZE_Y)){
+        return;
+    }
+
+    // boxの範囲内であることを確認(横)
+    if(x<LP3_maxXY){
+        // y軸補正
+        y += (mScrool - LOCATE_Y);
+        inputProgramChange(x,y,value);
     }
     else { // ボックスの右側[>] が押されている。
-        // y軸補正
-        y -= LOCATE_Y;
-        // モード切替
-        if(value == 0) {
-            // ボタンを離した時はタイマをキャンセルする。
-            // 右側全てでキャンセルになるけど、仕様とする
-            timerModeChange->cancel();
-        }
-        else
-        {
-            // スクロール
-            if(y == SCRKEY_UP  ) { inputScrool(-1); }   // 上スクロール
-            if(y == SCRKEY_DOWN) { inputScrool(+1); }   // 下スクロール
-            // ボタンを3秒以上押しっぱなしを判定するためのタイマーをセット
-            if(mStatus < ST_LORD_WAIT){
-                timerModeChange->schedule(3000 * 1000);
-                mScrKey = y;
-            }
-
-        }
+        inputRightGrid(x,y,value);
     }
 
 };
@@ -578,7 +632,7 @@ static auto inputLaunchPad = [&](MidiPacket packet){
     static uint8_t y;
     if(!Lp3::getLocation(packet,&x,&y)){
         // 処理が必要なボタンが押された場合
-        inputProgramChange(x,y,packet.getControlValue());
+        inputLaunchPadGrid(x,y,packet.getControlValue());
     }
 
 
