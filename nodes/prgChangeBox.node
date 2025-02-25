@@ -52,6 +52,9 @@ static const uint8_t PRGST_SET = 10;        // データあり
 static const uint8_t PRGST_FILL1 = 20;      // FILL1
 static const uint8_t PRGST_FILL2 = 21;      // FILL2
 
+// 色情報を設定するプログラム
+static const auto PRG_COLORSET = 15;
+
 // システムパケット
 static const auto CLOCK = MidiPacket::makeTimingClock();
 static const auto STOP = MidiPacket::makeTimingClockStop();
@@ -225,6 +228,10 @@ static auto getBaseColor = [&](uint8_t x,uint8_t y)-> uint8_t {
 // *color：色(戻り値)
 // *mode：明滅パターン(戻り値)
 static auto changeColorAndMode = [&](uint8_t prgNo,uint8_t* color,uint8_t* mode) {
+    // 色編集モードの時は特殊色は使用しない。
+    if(mStatus == ST_LORD_INPUT || mStatus == ST_CLR_OUTPUT){
+        return;
+    }
     // 色と明滅パターンを変える
     if(prgNo == mNowPrgNo) {
         *color = CL_NOW;
@@ -361,12 +368,19 @@ static auto isFillPattern = [&](uint8_t prgNo) -> bool {
 * programChange系関数
  ***********************************************************************/
 /*****************
+ * midi送信
+ * @param packet midiパケット
+ */
+static auto sendMidi = [&](auto packet){
+    out0 = packet;
+};
+
+/*****************
  * programChange送信
- * @param value value値
+ * @param prgNo プログラム番号(0～127)
  */
 static auto sendProgramchange = [&](uint8_t prgNo){
-    auto packet = MidiPacket::makeProgramChange(MIDI_CH, prgNo);
-    out0 = packet;
+    sendMidi(MidiPacket::makeProgramChange(MIDI_CH, prgNo));
 };
 
 /*****************
@@ -444,6 +458,9 @@ static auto inputPrgChange = [&](uint8_t prgNo){
 static auto setStatus = [&](uint8_t status){
     // ステータス変更
     mStatus = status;
+    // 現在選択しているプログラムNoの描画
+    drowProglamNo(mNowPrgNo);
+    drowProglamNo(mSettingPrgNo);
     // カーソルボタン描画
     drowCursorButton();
 };
@@ -453,26 +470,21 @@ static auto setStatus = [&](uint8_t status){
  ***********************************************************************/
 static auto changeMode2Wait = [&](){
 
-    switch(mScrKey){
-    case SCRKEY_DOWN:
-        // 下を押した場合（色読み込みモード）
-        // メモリ内容を全て初期化する。
-        crearPrgStateMap();
-        // セッティング(wait)
-        setStatus(ST_LORD_WAIT);
+    if(SCRKEY_DOWN == mScrKey || SCRKEY_UP == mScrKey){
+        // 下キー（色読込モード）の場合のみメモリ内容を全て初期化。
+        if(SCRKEY_DOWN == mScrKey){
+            crearPrgStateMap();
+        }
+        // ステータス変更（下：色読込、上：色編集）
+        setStatus((SCRKEY_DOWN == mScrKey )? ST_LORD_WAIT : ST_CLR_MODE);
         // タイマ割り込み中は色情報を自動送信されないのでLaunchPadへの送信を行う
         outLaunchPad();
-    break;
-    case SCRKEY_UP:
-        // 上を押した場合（色編集モード）
-        // セッティング(COLOREdit)
-        setStatus(ST_CLR_MODE);
-        // タイマ割り込み中は色情報を自動送信されないのでLaunchPadへの送信を行う
-        outLaunchPad();
-    break;
+        // プログラムチェンジ
+        sendProgramchange(PRG_COLORSET);
     }
-
 };
+
+
 /*********************************************
 * 割り込みイベント
 **********************************************/
@@ -653,60 +665,137 @@ static auto inputMidiNomal = [&](MidiPacket packet){
 
 };
 
-// 入力：プログラムデータ設定.クロック制御
-static auto inputMidiData = [&](MidiPacket packet){
-    // init bung
-    if(packet == CLOCK && mStatus == ST_LORD_INPUT){
+/**************************
+ * clock受信処理
+ */
+static auto clockStep = [&](){
+
+    if(mStatus == ST_CLR_OUTPUT && 0 == mClockCount % CLOCK4STEP){
+        static uint8_t step;
+        static uint8_t x;
+        static uint8_t y;
+        static uint8_t velocity;
+
+        step = mClockCount / CLOCK4STEP;        // step(0-15)
+        // 座標に変換
+        x = step % 8;
+
+        for( uint8_t ch = 0; ch<8;ch++){
+            y = ch * 2 + (step < 8 ? 0 : 1 );
+            // マトリクスへのデータ設定
+            velocity = 1;
+            if(mPrgStateMap[y][x] == PRGST_FILL2){         // 120より大きい
+                velocity = 127;
+            }
+            else if(mPrgStateMap[y][x] == PRGST_FILL1){    // 100より大きい
+                velocity = 110;
+            }
+            else if(mPrgStateMap[y][x] == PRGST_SET){      // 0より大きい(1～100)
+                velocity = 100;
+            }
+            // note on 送信
+            sendMidi(MidiPacket::makeNote(ch + 1,64,velocity));
+
+        }
+
+    }
+
+    if(mStatus == ST_LORD_INPUT || mStatus == ST_CLR_OUTPUT){
         // clock信号
         ++mClockCount;
         // 16step進んだ所で終了
         if(mClockCount >= 16 * CLOCK4STEP){
             // Midiglue::Debug::write_log("ip:STOP");
             setStatus(ST_IDOL);
+            // midi STOPを送信
+            sendMidi(STOP);
+            // プログラムを元に戻す
+            sendProgramchange(mNowPrgNo);
             reDrow();
         }
     }
-    else if(packet == START || packet == CONTINUE) {
-        // Midiglue::Debug::write_log("ip:START");
-        // ステータス設定（クリア）
+};
+
+/**************************
+ * start受信処理
+ */
+static auto stepStart = [&](){
+    // Midiglue::Debug::write_log("ip:START");
+    // 現在ステータスに合わせてステータス変更
+    if(mStatus == ST_LORD_WAIT){
         setStatus(ST_LORD_INPUT);
-        mClockCount = 0;
+    }
+    else if(mStatus == ST_CLR_MODE){
+        setStatus(ST_CLR_OUTPUT);
+    }
+    mClockCount = 0;
+
+};
+
+/**************************
+ * stop受信処理
+ */
+static auto stepStop = [&](){
+
+    // ステータス設定（完了）
+    setStatus(ST_IDOL);
+    reDrow();
+};
+
+// 入力：プログラムデータ設定.クロック制御
+static auto stepNote = [&](MidiPacket packet){
+
+    // 読み込みモード以外は処理を行わない
+    if(mStatus != ST_LORD_INPUT)
+    {   return;  }
+
+    // ノートONの場合
+    static uint8_t ch;
+    static uint8_t step;
+    static uint8_t x;
+    static uint8_t y;
+    static uint8_t velocity;
+
+    // channelとstep取得
+    ch = (packet.getChannel() - 1) % 8;     // ch(0-7に変換)
+    step = mClockCount / CLOCK4STEP;        // step(0-15)
+
+    // 座標に変換
+    x = step % 8;
+    y = ch * 2 + (step < 8 ? 0:1);
+
+
+    velocity = packet.getVelocity();
+    // マトリクスへのデータ設定
+    if(velocity > 120){         // 120より大きい
+        mPrgStateMap[y][x] = PRGST_FILL2;
+    }
+    else if(velocity > 100){    // 100より大きい
+        mPrgStateMap[y][x] = PRGST_FILL1;
+    }
+    else if(velocity > 1){      // 1より大きい(2～100)
+        mPrgStateMap[y][x] = PRGST_SET;
+    }
+    else{
+        mPrgStateMap[y][x] = PRGST_BLANK;
+    }
+
+};
+
+// 入力：プログラムデータ設定.クロック制御
+static auto inputMidiData = [&](MidiPacket packet){
+    // init bung
+    if(packet == CLOCK){
+        clockStep();
+    }
+    else if(packet == START || packet == CONTINUE) {
+        stepStart();
     }
     else if(packet == STOP){
-        // ステータス設定（完了）
-        setStatus(ST_IDOL);
-        reDrow();
+        stepStop();
     }
-    else if(packet.isNote() && 0 < packet.getControlValue()){
-        // ノートONの場合
-        static uint8_t ch;
-        static uint8_t step;
-        static uint8_t x;
-        static uint8_t y;
-
-        // channelとstep取得
-        ch = (packet.getChannel() - 1) % 8;     // ch(0-7に変換)
-        step = mClockCount / CLOCK4STEP;        // step(0-15)
-
-        // 座標に変換
-        x = step % 8;
-        y = ch * 2 + (step < 8 ? 0:1);
-
-        // Midiglue::Debug::write_log("ip:ch",ch);
-        // Midiglue::Debug::write_log("ip:step",step);
-        // Midiglue::Debug::write_log("ip:x",x);
-        // Midiglue::Debug::write_log("ip:y",y);
-
-        // マトリクスへのデータ設定
-        if(packet.getVelocity() > 120){         // 120
-            mPrgStateMap[y][x] = PRGST_FILL2;
-        }
-        else if(packet.getVelocity() > 100){    // 100
-            mPrgStateMap[y][x] = PRGST_FILL1;
-        }
-        else {
-            mPrgStateMap[y][x] = PRGST_SET;
-        }
+    else if(packet.isNote()){
+        stepNote(packet);
     }
 };
 
