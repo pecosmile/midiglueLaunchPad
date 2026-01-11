@@ -229,7 +229,7 @@ static auto getBaseColor = [&](uint8_t x,uint8_t y)-> uint8_t {
 // *mode：明滅パターン(戻り値)
 static auto changeColorAndMode = [&](uint8_t prgNo,uint8_t* color,uint8_t* mode) {
     // 色編集モードの時は特殊色は使用しない。
-    if(mStatus == ST_LORD_INPUT || mStatus == ST_CLR_OUTPUT){
+    if(mStatus == ST_LORD_INPUT || mStatus == ST_CLR_OUTPUT || mStatus == ST_CLR_MODE){
         return;
     }
     // 色と明滅パターンを変える
@@ -276,7 +276,6 @@ static auto drowProglamNo = [&](uint8_t prgNo) {
  */
 static auto drowCursorButton = [&](){
 
-
     // 色の決定
     uint8_t color = CL_CURSOR_IDOL;
     switch(mStatus){
@@ -306,8 +305,6 @@ static auto drowCursorButton = [&](){
     }
 
 };
-
-
 
 /***********************************************************************
 * 再描画
@@ -712,6 +709,8 @@ static auto clockStep = [&](){
             // プログラムを元に戻す
             sendProgramchange(mNowPrgNo);
             reDrow();
+            // midi STOPを再送信
+            sendMidi(STOP);
         }
     }
 };
